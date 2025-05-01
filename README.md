@@ -1,0 +1,322 @@
+# Nopnag StateMachineLib
+
+A lightweight and flexible state machine library for C# and Unity, designed for managing game logic flow.
+
+## Overview
+
+StateMachineLib provides tools to structure application logic into distinct states and define transitions between them. It allows for multiple state graphs running concurrently and supports various ways to trigger transitions, including conditions, events (via `Nopnag.EventBusLib`), and direct calls.
+
+## Key Features
+
+*   **Multiple Graphs:** Manage multiple independent state machines (`StateMachine` containing `StateGraph` instances) running in parallel.
+*   **State Units (`StateUnit`):** Define individual states with `Enter`, `Exit`, `Update`, `LateUpdate`, and `FixedUpdate` logic.
+*   **Rich Transition System:** Multiple ways to define transitions between states (`IStateTransition` implementations).
+*   **Time Tracking:** `StateUnit` tracks the time elapsed since it became active (`DeltaTimeSinceStart`).
+*   **Sub-States / Hierarchical States:** `StateUnit` can host its own `StateGraph` for complex, nested state logic.
+*   **EventBus Integration:** Trigger transitions based on events from `Nopnag.EventBusLib`.
+*   **Action Integration:** Trigger transitions via standard C# `Action` delegates.
+*   **Conditional Logic:** Use predicates (`Func<>`) for complex transition conditions.
+
+## Main Concepts
+
+*   **`StateMachine`**: The top-level container. It holds and manages one or more `StateGraph` instances, propagating `Update`, `LateUpdate`, and `FixedUpdate` calls to them.
+    ```csharp
+    // In your MonoBehaviour or main logic class
+    StateMachine stateMachine = new StateMachine();
+    ```
+
+*   **`StateGraph`**: Represents a single state machine graph. It manages a collection of `StateUnit` instances, keeps track of the `CurrentUnit`, and handles entering/exiting the graph and starting specific states.
+    ```csharp
+    StateGraph mainGraph = stateMachine.CreateGraph();
+    ```
+
+*   **`StateUnit`**: Represents a single state within a `StateGraph`. You assign behavior to it by setting its various `Action` delegates (e.g., `EnterStateFunction`, `UpdateStateFunction`). It contains a list of potential `Transitions` which are checked during its `Update` loop.
+    ```csharp
+    StateUnit idleState = mainGraph.CreateUnit("Idle");
+    idleState.EnterStateFunction = () => Debug.Log("Idling...");
+    idleState.UpdateStateFunction = (deltaTime) => { /* Do idle stuff */ };
+    ```
+
+*   **`IStateTransition`**: The interface for all transition types. Defines the `CheckTransition` method, which determines if a transition should occur and outputs the target `StateUnit`.
+
+## Advanced Features
+
+### Parallel State Graphs
+
+The `StateMachine` class can manage multiple `StateGraph` instances simultaneously. Each graph runs independently but is updated by the main `StateMachine` update calls (`UpdateMachine`, `FixedUpdateMachine`, etc.). This is useful for managing distinct aspects of an object or system concurrently.
+
+```csharp
+// In your setup
+StateMachine characterStateMachine = new StateMachine();
+
+// Graph for movement logic
+StateGraph movementGraph = characterStateMachine.CreateGraph(); 
+// ... define movement states and transitions ...
+
+// Graph for combat logic
+StateGraph combatGraph = characterStateMachine.CreateGraph();
+// ... define combat states and transitions ...
+
+// Start both graphs
+characterStateMachine.Start();
+
+// In Update loop, both graphs will be updated
+void Update()
+{
+    characterStateMachine.UpdateMachine(); 
+}
+```
+
+### Subgraphs / Hierarchical State Machines
+
+A `StateUnit` can contain its own nested `StateGraph`, allowing for more complex and organized state logic. When the parent `StateUnit` is active, its subgraph is also active and updated.
+
+```csharp
+// In your setup
+StateGraph mainGraph = stateMachine.CreateGraph();
+StateUnit combatState = mainGraph.CreateUnit("Combat");
+StateUnit patrollingState = mainGraph.CreateUnit("Patrolling");
+
+// Create a subgraph for detailed combat logic
+StateGraph combatSubgraph = new StateGraph(); 
+StateUnit aimingState = combatSubgraph.CreateUnit("Aiming");
+StateUnit shootingState = combatSubgraph.CreateUnit("Shooting");
+// ... define transitions within combatSubgraph ...
+
+// Assign the subgraph to the parent state
+combatState.SetSubStateGraph(combatSubgraph);
+// Or: combatState.GetSubStateGraph() returns a new graph and assigns it
+
+// Define transition into the combat state
+TransitionByEvent.Connect<EnemyDetectedEvent>(patrollingState, combatState);
+
+// ... other setup ...
+
+stateMachine.Start();
+
+// When patrollingState transitions to combatState:
+// 1. combatState.EnterStateFunction runs.
+// 2. combatSubgraph.EnterGraph() runs, starting its initial state (e.g., aimingState).
+// 3. While combatState is active, combatSubgraph is updated via combatState's Update/FixedUpdate/LateUpdate.
+```
+
+## Transition Types
+
+Transitions define how the state machine moves from one `StateUnit` to another. `TransitionByAction` and `TransitionByEvent` directly trigger state changes, while the others are evaluated during the source state's `Update` loop.
+
+*   **`BasicTransition`**: 
+    *   **How:** Connects two states based on a predicate evaluating to true/false.
+    *   **Trigger:** `predicate(elapsedTimeInState)` returns `true`.
+    *   **Usage:** 
+        ```csharp
+        // Transition from 'charging' to 'ready' after 2 seconds
+        BasicTransition.Connect(chargingState, readyState, 
+            elapsedTime => elapsedTime > 2.0f);
+        ```
+
+*   **`ConditionalTransition`**:
+    *   **How:** Connects a state to a dynamically chosen target state based on a predicate.
+    *   **Trigger:** `predicate(elapsedTimeInState)` returns a non-null `StateUnit`.
+    *   **Usage:** 
+        ```csharp
+        // Transition from 'patrolling' to 'chasing' or 'searching'
+        ConditionalTransition.Connect(patrollingState, 
+            elapsedTime => {
+                if (CanSeePlayer()) return chasingState;
+                if (HeardNoise()) return searchingState;
+                return null; // Stay in patrolling state
+            });
+        ```
+
+*   **`ConditionalTransitionByIndex`**:
+    *   **How:** Connects a state to one of several target states based on an index returned by a predicate.
+    *   **Trigger:** `predicate(elapsedTimeInState)` returns a valid, non-negative index into the `targetStateInfos` array.
+    *   **Usage:**
+        ```csharp
+        // Transition from 'aiming' based on weapon type index
+        StateUnit[] fireStates = { firePistolState, fireRifleState };
+        ConditionalTransitionByIndex.Connect(aimingState, fireStates,
+            elapsedTime => GetEquippedWeaponIndex()); // Returns 0 or 1, or -1
+        ```
+
+*   **`DirectTransition`**:
+    *   **How:** Connects two states unconditionally.
+    *   **Trigger:** Always triggers if checked. Use carefully, often as the last transition checked in a state.
+    *   **Usage:** 
+        ```csharp
+        // Immediately go from 'initializing' to 'idle'
+        DirectTransition.Connect(initializingState, idleState);
+        ```
+
+*   **`TransitionByAction`**:
+    *   **How:** Connects two states; transition occurs when a specific `Action` is invoked.
+    *   **Trigger:** The `ref Action signal` is invoked externally.
+    *   **Important:** Bypasses the regular check flow. Triggers *only if* the `baseUnit` is currently active.
+    *   **Usage:** 
+        ```csharp
+        // In setup:
+        public Action PlayerJumped;
+        TransitionByAction.Connect(groundedState, jumpingState, ref PlayerJumped);
+        
+        // Elsewhere (e.g., Input Handling):
+        if (Input.GetButtonDown("Jump")) PlayerJumped?.Invoke();
+        ```
+
+*   **`TransitionByEvent`**:
+    *   **How:** Connects two states; transition occurs when a specific `EventBusLib` event is raised.
+    *   **Trigger:** An event of type `T` is raised via `EventBus<T>.Raise(...)`.
+    *   **Optional Predicate:** Can filter events further with `Func<T, bool>`.
+    *   **Important:** Bypasses the regular check flow. Triggers *only if* the `baseUnit` is active (and predicate passes).
+    *   **Usage:**
+        ```csharp
+        // Simple event trigger
+        TransitionByEvent.Connect<PlayerDiedEvent>(aliveState, gameOverState);
+
+        // Conditional event trigger
+        TransitionByEvent.Connect<EnemySpottedEvent>(patrollingState, alertState, 
+            evt => evt.EnemyType == Enemy.EliteGuard);
+        ```
+
+## Practical Usage Example (Character Controller)
+
+This example demonstrates a character controller with Idle, Moving, Jumping, and Stunned states, using various transitions.
+
+```csharp
+using Nopnag.StateMachineLib;
+using Nopnag.StateMachineLib.Transition;
+using Nopnag.EventBusLib; // For JumpInputEvent and DamageTakenEvent
+using UnityEngine;
+using System;
+
+// --- Define Events used for Transitions ---
+public class DamageTakenEvent : BusEvent 
+{
+}
+
+public class CharacterController : MonoBehaviour
+{
+    private StateMachine stateMachine;
+    private StateGraph movementGraph;
+    private StateUnit idleState, movingState, jumpingState, stunnedState; 
+
+    private Rigidbody rb;
+    private float jumpForce = 5f;
+    private float _stunDuration = 0.5f; // How long stun lasts
+
+    void Awake()
+    {
+        rb = GetComponent<Rigidbody>();
+        if (rb == null) rb = gameObject.AddComponent<Rigidbody>(); // Ensure Rigidbody
+    }
+
+    void Start()
+    {
+        stateMachine = new StateMachine();
+        movementGraph = stateMachine.CreateGraph();
+
+        // --- 1. Define States ---
+        idleState = movementGraph.CreateUnit("Idle");
+        movingState = movementGraph.CreateUnit("Moving");
+        jumpingState = movementGraph.CreateUnit("Jumping");
+        stunnedState = movementGraph.CreateUnit("Stunned"); 
+
+        // --- 2. Assign State Logic ---
+        idleState.EnterStateFunction = () => { 
+            Debug.Log("Entering Idle State"); 
+        };
+        idleState.UpdateStateFunction = (dt) => { /* Maybe play idle animation */ };
+        
+        movingState.EnterStateFunction = () => Debug.Log("Entering Moving State");
+        movingState.UpdateStateFunction = (dt) => 
+        { 
+            // Apply movement force based on input (simplified)
+            Vector3 moveDir = GetMovementInput(); 
+            rb.AddForce(moveDir * 10f);
+        };
+
+        jumpingState.EnterStateFunction = () => 
+        {
+            Debug.Log("Entering Jumping State");
+            rb.AddForce(Vector3.up * jumpForce, ForceMode.Impulse);
+        };
+        
+        stunnedState.EnterStateFunction = () => Debug.Log("Entering Stunned State");
+        stunnedState.UpdateStateFunction = (dt) => { /* Maybe play stunned animation */ };
+
+        // --- 3. Define Transitions --- 
+
+        // --- Transitions TO Stunned (Triggered directly by DamageTakenEvent) ---
+        TransitionByEvent.Connect<DamageTakenEvent>(idleState, stunnedState);
+        TransitionByEvent.Connect<DamageTakenEvent>(movingState, stunnedState);
+        TransitionByEvent.Connect<DamageTakenEvent>(jumpingState, stunnedState);
+
+        // --- Transition FROM Stunned ---
+        // Go back to Idle after the stun duration
+        BasicTransition.Connect(stunnedState, idleState, 
+            elapsedTime => elapsedTime > _stunDuration);
+
+        // --- Normal Movement Transitions ---
+        // Idle -> Moving
+        BasicTransition.Connect(idleState, movingState,
+            elapsedTime => GetMovementInput().magnitude > 0.1f);
+
+        // Moving -> Idle
+        BasicTransition.Connect(movingState, idleState,
+            elapsedTime => GetMovementInput().magnitude <= 0.1f);
+
+        // Idle -> Jumping (Using BasicTransition with direct input check)
+        // TransitionByEvent.Connect<JumpInputEvent>(idleState, jumpingState);
+        BasicTransition.Connect(idleState, jumpingState,
+            elapsedTime => Input.GetButtonDown("Jump"));
+
+        // Moving -> Jumping (Using BasicTransition with direct input check)
+        // TransitionByEvent.Connect<JumpInputEvent>(movingState, jumpingState);
+        BasicTransition.Connect(movingState, jumpingState,
+            elapsedTime => Input.GetButtonDown("Jump"));
+
+        BasicTransition.Connect(jumpingState, idleState, 
+            elapsedTime => elapsedTime > 1.0f); 
+
+        // --- 4. Start the State Machine ---
+        stateMachine.Start();
+
+    }
+
+    void Update()
+    {
+        stateMachine.UpdateMachine();
+    }
+
+    void OnDestroy()
+    {
+        stateMachine?.Exit(); // Clean up graph states
+    }
+
+    Vector3 GetMovementInput()
+    {
+        float horizontal = Input.GetAxis("Horizontal");
+        float vertical = Input.GetAxis("Vertical");
+        return new Vector3(horizontal, 0, vertical).normalized;
+    }
+}
+
+## Installation
+
+You can install this package using the Unity Package Manager:
+
+1.  Open the Package Manager (`Window` > `Package Manager`).
+2.  Click the `+` button in the top-left corner.
+3.  Select `Add package from git URL...`.
+4.  Enter the repository URL: `[Your Git Repository URL for StateMachineLib]`
+5.  Click `Add`.
+
+Alternatively, you can add it directly to your `manifest.json` file in the `Packages` folder:
+```json
+{
+  "dependencies": {
+    "com.nopnag.statemachinelib": "[Your Git Repository URL for StateMachineLib]",
+    "com.nopnag.eventbuslib": "[Your Git Repository URL for EventBusLib]", // Add dependency if needed
+    // ... other dependencies
+  }
+}
+``` 
