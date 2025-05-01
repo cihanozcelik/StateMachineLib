@@ -39,6 +39,31 @@ StateMachineLib provides tools to structure application logic into distinct stat
 
 *   **`IStateTransition`**: The interface for all transition types. Defines the `CheckTransition` method, which determines if a transition should occur and outputs the target `StateUnit`.
 
+## Listening to Events Only While a State is Active
+
+A powerful feature of StateMachineLib is the ability to listen to events only while a specific state is active. This is achieved using the `StateUnit.Listen` method:
+
+### Basic Usage
+```csharp
+// Listen to all MyEvent events, but only while this state is active
+myState.Listen<MyEvent>(evt => {
+    Debug.Log($"MyEvent received in state: {myState.Name}");
+});
+```
+
+### Parameter-Filtered Listening (with EventQuery)
+```csharp
+// Listen to MyEvent events with a specific parameter, only while this state is active
+var query = EventBus<MyEvent>.Where<MyParam>(myValue);
+myState.Listen(query, evt => {
+    Debug.Log($"MyEvent with param received in state: {myState.Name}");
+});
+```
+
+**Why is this important?**
+- The callback is only invoked if the state is currently active, so you don't need to manually unsubscribe or check state inside the handler.
+- With the EventQuery overload, you can listen to only a subset of events (e.g., only those with a certain parameter value), making your state logic more precise and efficient.
+
 ## Advanced Features
 
 ### Parallel State Graphs

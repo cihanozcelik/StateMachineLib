@@ -475,6 +475,66 @@ namespace Nopnag.StateMachineLib.Tests
             Assert.IsTrue(transitioned, "Did not transition on correct parameter and predicate!");
         }
 
+        [UnityTest]
+        public IEnumerator StateUnit_Listen_OnlyWhileActive()
+        {
+            bool called = false;
+            _state1.Listen<TestEventA>(evt => called = true);
+            _stateMachine.Start();
+            yield return null;
+            // Should be in state1, so event triggers
+            EventBus<TestEventA>.Raise(new TestEventA());
+            yield return null;
+            Assert.IsTrue(called, "Listener should be called while state is active");
+
+            // Transition to state2
+            DirectTransition.Connect(_state1, _state2);
+            _state1.ExitStateFunction = () => { };
+            _stateMachine.UpdateMachine();
+            yield return null;
+            called = false;
+            // Now state1 is not active, should NOT trigger
+            EventBus<TestEventA>.Raise(new TestEventA());
+            yield return null;
+            Assert.IsFalse(called, "Listener should NOT be called when state is not active");
+        }
+
+        [UnityTest]
+        public IEnumerator StateUnit_Listen_WithEventQuery_OnlyWhileActiveAndMatchingParam()
+        {
+            var param1 = new CustomParam();
+            var param2 = new CustomParam();
+            bool called = false;
+            var query = EventBus<TestEventA>.Where<CustomParam>(param1);
+            _state1.Listen(query, evt => called = true);
+            _stateMachine.Start();
+            yield return null;
+            // Should be in state1, event with param2 should NOT trigger
+            var evtWrong = new TestEventA();
+            evtWrong.Set<CustomParam>(param2);
+            EventBus<TestEventA>.Raise(evtWrong);
+            yield return null;
+            Assert.IsFalse(called, "Listener should NOT be called for wrong param");
+            // Event with param1 should trigger
+            var evtRight = new TestEventA();
+            evtRight.Set<CustomParam>(param1);
+            EventBus<TestEventA>.Raise(evtRight);
+            yield return null;
+            Assert.IsTrue(called, "Listener should be called for correct param while active");
+            // Transition to state2
+            DirectTransition.Connect(_state1, _state2);
+            _state1.ExitStateFunction = () => { };
+            _stateMachine.UpdateMachine();
+            yield return null;
+            called = false;
+            // Now state1 is not active, even correct param should NOT trigger
+            var evtAfter = new TestEventA();
+            evtAfter.Set<CustomParam>(param1);
+            EventBus<TestEventA>.Raise(evtAfter);
+            yield return null;
+            Assert.IsFalse(called, "Listener should NOT be called when state is not active, even for correct param");
+        }
+
         public class CustomParam : object, IParameter { }
         public class TestEventWithFlag : BusEvent { public bool AllowTransition; }
     }

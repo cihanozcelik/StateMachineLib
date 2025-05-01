@@ -76,9 +76,30 @@ namespace Nopnag.StateMachineLib
       _subGraph?.LateUpdateGraph();
     }
 
+    /// <summary>
+    /// Subscribes to events of type T from the EventBus, but only invokes the listener while this state is active.
+    /// </summary>
+    /// <typeparam name="T">The event type to listen for.</typeparam>
+    /// <param name="listener">The callback to invoke when the event is raised and this state is active.</param>
     public void Listen<T>(ListenerDelegate<T> listener) where T : BusEvent
     {
       EventBus<T>.Listen(
+        @event =>
+        {
+          if (IsActive()) listener.Invoke(@event);
+        }
+      );
+    }
+
+    /// <summary>
+    /// Subscribes to filtered events (via EventQuery) of type T from the EventBus, but only invokes the listener while this state is active.
+    /// </summary>
+    /// <typeparam name="T">The event type to listen for.</typeparam>
+    /// <param name="query">The EventQuery to filter which events to listen for.</param>
+    /// <param name="listener">The callback to invoke when the filtered event is raised and this state is active.</param>
+    public void Listen<T>(EventQuery<T> query, ListenerDelegate<T> listener) where T : BusEvent
+    {
+      query.Listen(
         @event =>
         {
           if (IsActive()) listener.Invoke(@event);
