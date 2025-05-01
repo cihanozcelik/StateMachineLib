@@ -25,5 +25,27 @@ namespace Nopnag.StateMachineLib.Transition
         }
       );
     }
+
+    public static void Connect<T>(StateUnit baseUnit, StateUnit targetUnit, EventQuery<T> query)
+      where T : BusEvent
+    {
+      query.Listen(
+        @event =>
+        {
+          if (baseUnit.IsActive()) baseUnit.BaseGraph.StartState(targetUnit);
+        }
+      );
+    }
+
+    public static void Connect<T>(StateUnit baseUnit, StateUnit targetUnit, EventQuery<T> query, Func<T, bool> predicate)
+      where T : BusEvent
+    {
+      query.Listen(
+        @event =>
+        {
+          if (baseUnit.IsActive() && predicate(@event)) baseUnit.BaseGraph.StartState(targetUnit);
+        }
+      );
+    }
   }
 }

@@ -395,5 +395,87 @@ namespace Nopnag.StateMachineLib.Tests
             Assert.IsTrue(_stunnedExited);
             // state1Entered should be true again if it resets on enter, check Setup/Teardown logic
         }
+
+        [UnityTest]
+        public IEnumerator TransitionByEvent_WithEventQuery_WorksOnlyForMatchingParameter()
+        {
+            // Arrange
+            var param1 = new CustomParam();
+            var param2 = new CustomParam();
+            bool transitioned = false;
+            _state1.ExitStateFunction = () => transitioned = true;
+
+            // EventQuery: only match events with param1
+            var query = EventBus<TestEventA>.Where<CustomParam>(param1);
+            TransitionByEvent.Connect(_state1, _state2, query);
+
+            _stateMachine.Start();
+            yield return null;
+            Assert.AreEqual("State1", _graphA.GetCurrentStateName());
+
+            // Raise event with param2 (should NOT transition)
+            var evtWrong = new TestEventA();
+            evtWrong.Set<CustomParam>(param2);
+            EventBus<TestEventA>.Raise(evtWrong);
+            yield return null;
+            Assert.AreEqual("State1", _graphA.GetCurrentStateName());
+            Assert.IsFalse(transitioned, "Transitioned on wrong parameter!");
+
+            // Raise event with param1 (should transition)
+            var evtRight = new TestEventA();
+            evtRight.Set<CustomParam>(param1);
+            EventBus<TestEventA>.Raise(evtRight);
+            yield return null;
+            Assert.AreEqual("State2", _graphA.GetCurrentStateName());
+            Assert.IsTrue(transitioned, "Did not transition on correct parameter!");
+        }
+
+        [UnityTest]
+        public IEnumerator TransitionByEvent_WithEventQueryAndPredicate_WorksOnlyForMatchingParameterAndPredicate()
+        {
+            // Arrange
+            var param1 = new CustomParam();
+            var param2 = new CustomParam();
+            bool transitioned = false;
+            _state1.ExitStateFunction = () => transitioned = true;
+
+            // Predicate: only allow transition if event's AllowTransition property is true
+            Func<TestEventWithFlag, bool> predicate = evt => evt.AllowTransition;
+
+            // EventQuery: only match events with param1
+            var query = EventBus<TestEventWithFlag>.Where<CustomParam>(param1);
+            TransitionByEvent.Connect(_state1, _state2, query, predicate);
+
+            _stateMachine.Start();
+            yield return null;
+            Assert.AreEqual("State1", _graphA.GetCurrentStateName());
+
+            // Raise event with param2 (should NOT transition)
+            var evtWrongParam = new TestEventWithFlag { AllowTransition = true };
+            evtWrongParam.Set<CustomParam>(param2);
+            EventBus<TestEventWithFlag>.Raise(evtWrongParam);
+            yield return null;
+            Assert.AreEqual("State1", _graphA.GetCurrentStateName());
+            Assert.IsFalse(transitioned, "Transitioned on wrong parameter!");
+
+            // Raise event with param1 but predicate false (should NOT transition)
+            var evtWrongPredicate = new TestEventWithFlag { AllowTransition = false };
+            evtWrongPredicate.Set<CustomParam>(param1);
+            EventBus<TestEventWithFlag>.Raise(evtWrongPredicate);
+            yield return null;
+            Assert.AreEqual("State1", _graphA.GetCurrentStateName());
+            Assert.IsFalse(transitioned, "Transitioned when predicate was false!");
+
+            // Raise event with param1 and predicate true (should transition)
+            var evtRight = new TestEventWithFlag { AllowTransition = true };
+            evtRight.Set<CustomParam>(param1);
+            EventBus<TestEventWithFlag>.Raise(evtRight);
+            yield return null;
+            Assert.AreEqual("State2", _graphA.GetCurrentStateName());
+            Assert.IsTrue(transitioned, "Did not transition on correct parameter and predicate!");
+        }
+
+        public class CustomParam : object, IParameter { }
+        public class TestEventWithFlag : BusEvent { public bool AllowTransition; }
     }
 } 
