@@ -1,0 +1,23 @@
+{
+    "name": "Nopnag.StateMachineLib.Tests",
+    "rootNamespace": "Nopnag.StateMachineLib.Tests",
+    "references": [
+        "Nopnag.StateMachineLib.Runtime",
+        "Nopnag.EventBusLib.Runtime",
+        "UnityEngine.TestRunner",
+        "UnityEditor.TestRunner"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": true,
+    "precompiledReferences": [
+        "nunit.framework.dll"
+    ],
+    "autoReferenced": false,
+    "defineConstraints": [
+        "UNITY_INCLUDE_TESTS"
+    ],
+    "versionDefines": [],
+    "noEngineReferences": false
+} 

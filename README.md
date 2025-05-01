@@ -302,20 +302,23 @@ public class CharacterController : MonoBehaviour
 
 ## Installation
 
-You can install this package using the Unity Package Manager:
+**Important:** This package depends on `Nopnag.EventBusLib`. You need to install both packages for StateMachineLib to work correctly.
+
+You can install these packages using the Unity Package Manager:
 
 1.  Open the Package Manager (`Window` > `Package Manager`).
-2.  Click the `+` button in the top-left corner.
-3.  Select `Add package from git URL...`.
-4.  Enter the repository URL: `[Your Git Repository URL for StateMachineLib]`
-5.  Click `Add`.
+2.  Click the `+` button in the top-left corner and select `Add package from git URL...`.
+3.  Enter the repository URL for EventBusLib: `https://github.com/cihanozcelik/EventBusLib.git` and click `Add`.
+4.  Repeat step 2.
+5.  Enter the repository URL for StateMachineLib: `https://github.com/cihanozcelik/StateMachineLib.git` and click `Add`.
 
-Alternatively, you can add it directly to your `manifest.json` file in the `Packages` folder:
+
+Alternatively, you can add both directly to your `Packages/manifest.json` file:
 ```json
 {
   "dependencies": {
-    "com.nopnag.statemachinelib": "[Your Git Repository URL for StateMachineLib]",
-    "com.nopnag.eventbuslib": "[Your Git Repository URL for EventBusLib]", // Add dependency if needed
+    "com.nopnag.eventbuslib": "https://github.com/cihanozcelik/EventBusLib.git", 
+    "com.nopnag.statemachinelib": "https://github.com/cihanozcelik/StateMachineLib.git",
     // ... other dependencies
   }
 }
