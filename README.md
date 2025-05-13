@@ -16,6 +16,7 @@ StateMachineLib provides tools to structure application logic into distinct stat
 *   **EventBus Integration:** Trigger transitions based on events from `Nopnag.EventBusLib`.
 *   **Action Integration:** Trigger transitions via standard C# `Action` delegates.
 *   **Conditional Logic:** Use predicates (`Func<>`) for complex transition conditions.
+*   **Time-Based Callbacks:** Schedule actions to occur once after a specific delay (`At`) or repeatedly at set intervals (`AtEvery`) within a state.
 
 ## Main Concepts
 
@@ -123,6 +124,51 @@ stateMachine.Start();
 // 1. combatState.EnterStateFunction runs.
 // 2. combatSubgraph.EnterGraph() runs, starting its initial state (e.g., aimingState).
 // 3. While combatState is active, combatSubgraph is updated via combatState's Update/FixedUpdate/LateUpdate.
+```
+
+### Time-Based Callbacks within States
+
+`StateUnit` provides convenient methods to schedule actions based on the time elapsed since the state became active (`DeltaTimeSinceStart`). These callbacks are automatically managed and reset if the state is re-entered.
+
+#### `At(float targetTime, Action callback)`
+
+Schedules an `Action` to be invoked once when `DeltaTimeSinceStart` reaches or exceeds `targetTime`. If the state is re-entered, the timer is reset, and the action can be invoked again after the specified `targetTime`.
+
+**Usage:**
+
+```csharp
+StateUnit preparingState = mainGraph.CreateUnit("Preparing");
+
+preparingState.EnterStateFunction = () => Debug.Log("Preparing action...");
+
+// After 3 seconds in PreparingState, log a message
+preparingState.At(3.0f, () => {
+    Debug.Log("Preparation complete after 3 seconds!");
+});
+```
+
+#### `AtEvery(float intervalTime, Action callback)`
+
+Schedules an `Action` to be invoked repeatedly at specified `intervalTime` periods while the state is active. The first invocation occurs when `DeltaTimeSinceStart` reaches or exceeds the first `intervalTime`. If the state is re-entered, the interval timing is reset.
+
+**Usage:**
+
+```csharp
+StateUnit activeState = mainGraph.CreateUnit("Active");
+
+activeState.EnterStateFunction = () => Debug.Log("ActiveState started. Monitoring...");
+
+// Every 5 seconds, print a monitoring message
+activeState.AtEvery(5.0f, () => {
+    Debug.Log($"Monitoring... (Time in state: {activeState.DeltaTimeSinceStart}s)");
+});
+```
+Both `At` and `AtEvery` ensure that the callback is only invoked if the state is currently active. The provided `Action` delegate should be parameterless. If you need to access state-specific data like `DeltaTimeSinceStart` or the `StateUnit` instance itself within the callback, you can do so via a lambda closure:
+
+```csharp
+myState.At(2.5f, () => {
+    Debug.Log($"Action at {myState.DeltaTimeSinceStart} seconds in state {myState.Name}");
+});
 ```
 
 ## Transition Types

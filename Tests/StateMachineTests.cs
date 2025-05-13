@@ -537,5 +537,229 @@ namespace Nopnag.StateMachineLib.Tests
 
         public class CustomParam : object, IParameter { }
         public class TestEventWithFlag : BusEvent { public bool AllowTransition; }
+
+        // ---- Tests for StateUnit At and AtEvery ----
+
+        [UnityTest]
+        public IEnumerator StateUnit_At_CallbackInvoked_AfterTargetTime()
+        {
+            bool atCallbackCalled = false;
+            _state1.At(0.1f, () => atCallbackCalled = true);
+
+            _stateMachine.Start();
+            yield return null; // Initial Enter
+
+            Assert.IsFalse(atCallbackCalled, "At callback called prematurely.");
+
+            yield return new WaitForSeconds(0.12f); // Wait past target time
+            _stateMachine.UpdateMachine(); // Process time
+            yield return null;
+
+            Assert.IsTrue(atCallbackCalled, "At callback was not called after target time.");
+        }
+
+        [UnityTest]
+        public IEnumerator StateUnit_At_CallbackNotInvoked_BeforeTargetTime()
+        {
+            bool atCallbackCalled = false;
+            _state1.At(0.2f, () => atCallbackCalled = true);
+
+            _stateMachine.Start();
+            yield return null;
+
+            yield return new WaitForSeconds(0.1f); // Wait, but not enough
+            _stateMachine.UpdateMachine();
+            yield return null;
+
+            Assert.IsFalse(atCallbackCalled, "At callback called before target time.");
+        }
+
+        [UnityTest]
+        public IEnumerator StateUnit_At_CallbackResetsAndInvokes_OnStateReEnter()
+        {
+            bool atCallbackCalled = false;
+            int atCallbackCount = 0;
+            _state1.At(0.05f, () => { atCallbackCalled = true; atCallbackCount++; });
+
+            _stateMachine.Start(); // Enter State1
+            yield return new WaitForSeconds(0.07f);
+            _stateMachine.UpdateMachine();
+            yield return null;
+            Assert.IsTrue(atCallbackCalled, "At callback not called on first enter.");
+            Assert.AreEqual(1, atCallbackCount, "At callback count incorrect on first enter.");
+
+            // Transition to State2 and back to State1 using TransitionByAction
+            atCallbackCalled = false; // Reset flag for re-enter
+            Action transitionToS2 = null;
+            Action transitionToS1FromS2 = null;
+            TransitionByAction.Connect(_state1, _state2, ref transitionToS2);
+            TransitionByAction.Connect(_state2, _state1, ref transitionToS1FromS2);
+
+            transitionToS2?.Invoke(); // Trigger _state1 -> _state2
+            yield return null; // Allow transition to complete
+            Assert.AreEqual("State2", _graphA.GetCurrentStateName());
+
+            transitionToS1FromS2?.Invoke(); // Trigger _state2 -> _state1 (re-enter _state1)
+            yield return null; // Allow transition to complete
+            Assert.AreEqual("State1", _graphA.GetCurrentStateName());
+            Assert.IsFalse(atCallbackCalled, "At callback called immediately on re-enter without waiting.");
+
+            yield return new WaitForSeconds(0.07f);
+            _stateMachine.UpdateMachine();
+            yield return null;
+            Assert.IsTrue(atCallbackCalled, "At callback not called after re-enter and wait.");
+            Assert.AreEqual(2, atCallbackCount, "At callback count incorrect on re-enter.");
+        }
+        
+        [UnityTest]
+        public IEnumerator StateUnit_At_CallbackInvoked_WithZeroTargetTime()
+        {
+            bool atCallbackCalled = false;
+            _state1.At(0f, () => atCallbackCalled = true);
+
+            _stateMachine.Start(); // Enter State1, should check At(0) 
+            // CheckScheduledCallbacks is called in StateUnit.Start() after EnterStateFunction
+            // and also in Update() before transitions. So it should be called.
+            yield return null; // Let Start and initial Update cycle if any from UpdateMachine run
+            _stateMachine.UpdateMachine(); // Ensure one update cycle
+            yield return null;
+
+            Assert.IsTrue(atCallbackCalled, "At(0) callback was not called.");
+        }
+
+        [UnityTest]
+        public IEnumerator StateUnit_AtEvery_CallbackInvoked_AtIntervals()
+        {
+            int atEveryCallbackCount = 0;
+            float interval = 0.1f;
+            _state1.AtEvery(interval, () => atEveryCallbackCount++);
+
+            _stateMachine.Start();
+            yield return null;
+
+            Assert.AreEqual(0, atEveryCallbackCount, "AtEvery callback called prematurely.");
+
+            yield return new WaitForSeconds(interval * 1.2f); // Past 1st interval
+            _stateMachine.UpdateMachine();
+            yield return null;
+            Assert.AreEqual(1, atEveryCallbackCount, "AtEvery callback not called after 1st interval.");
+
+            yield return new WaitForSeconds(interval); // Past 2nd interval
+            _stateMachine.UpdateMachine();
+            yield return null;
+            Assert.AreEqual(2, atEveryCallbackCount, "AtEvery callback not called after 2nd interval.");
+
+            yield return new WaitForSeconds(interval); // Past 3rd interval
+            _stateMachine.UpdateMachine();
+            yield return null;
+            Assert.AreEqual(3, atEveryCallbackCount, "AtEvery callback not called after 3rd interval.");
+        }
+
+        [UnityTest]
+        public IEnumerator StateUnit_AtEvery_CallbackNotInvoked_BeforeFirstInterval()
+        {
+            int atEveryCallbackCount = 0;
+            _state1.AtEvery(0.2f, () => atEveryCallbackCount++);
+
+            _stateMachine.Start();
+            yield return null;
+
+            yield return new WaitForSeconds(0.1f); // Not enough time
+            _stateMachine.UpdateMachine();
+            yield return null;
+            Assert.AreEqual(0, atEveryCallbackCount, "AtEvery callback called before first interval.");
+        }
+
+        [UnityTest]
+        public IEnumerator StateUnit_AtEvery_CallbackResetsAndInvokes_OnStateReEnter()
+        {
+            int atEveryCallbackCount = 0;
+            float interval = 0.05f;
+            _state1.AtEvery(interval, () => atEveryCallbackCount++);
+
+            _stateMachine.Start(); // Enter State1
+            yield return new WaitForSeconds(interval * 1.2f); // 1st interval
+            _stateMachine.UpdateMachine();
+            yield return null;
+            Assert.AreEqual(1, atEveryCallbackCount, "AtEvery not called on 1st interval (first enter).");
+            
+            yield return new WaitForSeconds(interval); // 2nd interval
+            _stateMachine.UpdateMachine();
+            yield return null;
+            Assert.AreEqual(2, atEveryCallbackCount, "AtEvery not called on 2nd interval (first enter).");
+
+            // Transition to State2 and back to State1 using TransitionByAction
+            atEveryCallbackCount = 0; // Reset counter for re-enter
+            Action transitionToS2 = null;
+            Action transitionToS1FromS2 = null;
+            TransitionByAction.Connect(_state1, _state2, ref transitionToS2);
+            TransitionByAction.Connect(_state2, _state1, ref transitionToS1FromS2);
+
+            transitionToS2?.Invoke(); // _state1 -> _state2
+            yield return null; // Allow transition to complete
+            Assert.AreEqual("State2", _graphA.GetCurrentStateName());
+            
+            transitionToS1FromS2?.Invoke(); // _state2 -> _state1 (re-enter _state1)
+            yield return null; // Allow transition to complete
+            Assert.AreEqual("State1", _graphA.GetCurrentStateName());
+            Assert.AreEqual(0, atEveryCallbackCount, "AtEvery called immediately on re-enter without waiting.");
+
+            yield return new WaitForSeconds(interval * 1.2f); // 1st interval after re-enter
+            _stateMachine.UpdateMachine();
+            yield return null;
+            Assert.AreEqual(1, atEveryCallbackCount, "AtEvery not called on 1st interval (after re-enter).");
+            
+            yield return new WaitForSeconds(interval); // 2nd interval after re-enter
+            _stateMachine.UpdateMachine();
+            yield return null;
+            Assert.AreEqual(2, atEveryCallbackCount, "AtEvery not called on 2nd interval (after re-enter).");
+        }
+
+        [UnityTest]
+        public IEnumerator StateUnit_AtEvery_HandlesZeroOrNegativeInterval_Gracefully()
+        {
+            int callbackCount = 0;
+            LogAssert.Expect(LogType.Warning, "StateUnit.AtEvery: intervalTime must be positive.");
+            _state1.AtEvery(0f, () => callbackCount++);
+            
+            LogAssert.Expect(LogType.Warning, "StateUnit.AtEvery: intervalTime must be positive.");
+            _state1.AtEvery(-0.1f, () => callbackCount++);
+
+            _stateMachine.Start();
+            yield return new WaitForSeconds(0.1f);
+            _stateMachine.UpdateMachine();
+            yield return null;
+
+            Assert.AreEqual(0, callbackCount, "Callback invoked for zero or negative interval.");
+        }
+
+        [UnityTest]
+        public IEnumerator StateUnit_AtEvery_MultipleInvocations_IfMultipleIntervalsPassInOneUpdate()
+        {
+            int atEveryCallbackCount = 0;
+            float interval = 0.05f; // Small interval
+            _state1.AtEvery(interval, () => atEveryCallbackCount++);
+
+            _stateMachine.Start();
+            yield return null;
+
+            // Wait for a duration that covers multiple intervals (e.g., 3.5 intervals)
+            // Time.timeScale might need adjustment for this to be reliable in tests, but WaitForSeconds 
+            // should make Unity's internal time advance sufficiently.
+            yield return new WaitForSeconds(interval * 3.5f); 
+            
+            _stateMachine.UpdateMachine(); // Single update call after a longer pause
+            yield return null;
+
+            // StateUnit.CheckPeriodicCallbacks uses a while loop, so it should catch up.
+            Assert.AreEqual(3, atEveryCallbackCount, "AtEvery did not invoke for all missed intervals.");
+
+            // Check one more interval to ensure it continues correctly
+            atEveryCallbackCount = 0; // Reset for clarity
+            yield return new WaitForSeconds(interval * 1.2f);
+            _stateMachine.UpdateMachine();
+            yield return null;
+            Assert.AreEqual(1, atEveryCallbackCount, "AtEvery did not continue correctly after catching up.");
+        }
     }
 } 
