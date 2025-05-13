@@ -8,6 +8,34 @@ namespace Nopnag.StateMachineLib
 {
   public class StateUnit
   {
+    struct ScheduledCallback
+    {
+      public float TargetTime;
+      public Action Callback;
+      public bool HasBeenInvoked;
+
+      public ScheduledCallback(float targetTime, Action callback)
+      {
+        TargetTime = targetTime;
+        Callback = callback;
+        HasBeenInvoked = false;
+      }
+    }
+
+    struct PeriodicCallback
+    {
+      public float IntervalTime;
+      public Action Callback;
+      public float NextInvocationTime;
+
+      public PeriodicCallback(float intervalTime, Action callback)
+      {
+        IntervalTime = intervalTime;
+        Callback = callback;
+        NextInvocationTime = intervalTime;
+      }
+    }
+
     public readonly StateGraph BaseGraph;
     public Action EnterStateFunction;
 
@@ -20,6 +48,8 @@ namespace Nopnag.StateMachineLib
     public Action<float> UpdateStateBeforeTransitionCheckFunction;
     public Action<float> UpdateStateFunction;
 
+    readonly List<ScheduledCallback> _scheduledCallbacks = new();
+    readonly List<PeriodicCallback> _periodicCallbacks = new();
     float _previousTime;
     StateGraph _subGraph;
 
@@ -30,6 +60,21 @@ namespace Nopnag.StateMachineLib
     }
 
     public float DeltaTimeSinceStart { get; private set; }
+
+    public void At(float targetTime, Action callback)
+    {
+      _scheduledCallbacks.Add(new ScheduledCallback(targetTime, callback));
+    }
+
+    public void AtEvery(float intervalTime, Action callback)
+    {
+      if (intervalTime <= 0f)
+      {
+        Debug.LogWarning("StateUnit.AtEvery: intervalTime must be positive.");
+        return;
+      }
+      _periodicCallbacks.Add(new PeriodicCallback(intervalTime, callback));
+    }
 
     public bool CheckTransitions()
     {
@@ -127,6 +172,22 @@ namespace Nopnag.StateMachineLib
       EnterStateFunction?.Invoke();
       _subGraph?.EnterGraph();
 
+      for (int i = 0; i < _scheduledCallbacks.Count; i++)
+      {
+        var sc = _scheduledCallbacks[i];
+        sc.HasBeenInvoked = false;
+        _scheduledCallbacks[i] = sc;
+      }
+
+      for (int i = 0; i < _periodicCallbacks.Count; i++)
+      {
+        var pc = _periodicCallbacks[i];
+        pc.NextInvocationTime = pc.IntervalTime;
+        _periodicCallbacks[i] = pc;
+      }
+
+      CheckScheduledCallbacks();
+      CheckPeriodicCallbacks();
       CheckTransitions();
     }
 
@@ -135,11 +196,50 @@ namespace Nopnag.StateMachineLib
       DeltaTimeSinceStart += (Time.time - _previousTime) * 1; // timescale here
       _previousTime = Time.time;
       UpdateStateBeforeTransitionCheckFunction?.Invoke(DeltaTimeSinceStart);
+
+      CheckScheduledCallbacks();
+      CheckPeriodicCallbacks();
+
       if (CheckTransitions()) return false;
 
       UpdateStateFunction?.Invoke(DeltaTimeSinceStart);
       _subGraph?.UpdateGraph();
       return true;
+    }
+    
+    void CheckScheduledCallbacks()
+    {
+      for (int i = 0; i < _scheduledCallbacks.Count; i++)
+      {
+        var scheduledCallback = _scheduledCallbacks[i]; // Get a copy of the struct
+        if (!scheduledCallback.HasBeenInvoked && DeltaTimeSinceStart >= scheduledCallback.TargetTime)
+        {
+          scheduledCallback.Callback?.Invoke();
+          scheduledCallback.HasBeenInvoked = true;
+          _scheduledCallbacks[i] = scheduledCallback; // Assign the modified copy back
+        }
+      }
+    }
+
+    void CheckPeriodicCallbacks()
+    {
+      for (int i = 0; i < _periodicCallbacks.Count; i++)
+      {
+        var pc = _periodicCallbacks[i]; // Get a copy of the struct
+        bool invokedInLoop = false;
+
+        while (DeltaTimeSinceStart >= pc.NextInvocationTime && pc.IntervalTime > 0)
+        {
+          pc.Callback?.Invoke();
+          pc.NextInvocationTime += pc.IntervalTime;
+          invokedInLoop = true;
+        }
+
+        if (invokedInLoop)
+        {
+          _periodicCallbacks[i] = pc; // Assign the modified copy back
+        }
+      }
     }
   }
 }
