@@ -321,13 +321,59 @@ This defines a `BasicTransition` that triggers after a specific `duration` (in s
 
 ```csharp
 StateUnit loadingState = myGraph.CreateState();
-StateUnitreadyState = myGraph.CreateState();
+StateUnit readyState = myGraph.CreateState();
 
 // Transition from loadingState to readyState after 2.5 seconds
 (loadingState > readyState).After(2.5f);
 ```
 
-Future methods (like `.On<Event>()`, `.Immediately()`, etc.) will be added to this fluent API.
+### `.On<TEvent>(...)` (for EventBus Events)
+
+This defines a `TransitionByEvent`. It has several overloads:
+
+*   **`On<TEvent>()`**: Triggers when any event of `TEvent` is raised.
+    ```csharp
+    (stateA > stateB).On<PlayerDiedEvent>();
+    ```
+*   **`On<TEvent>(Func<TEvent, bool> predicate)`**: Triggers if `TEvent` is raised AND the predicate returns `true`.
+    ```csharp
+    (stateA > stateB).On<EnemySpottedEvent>(evt => evt.IsHighPriority);
+    ```
+*   **`On<TEvent>(EventQuery<TEvent> query, Func<TEvent, bool> predicate = null)`**: Triggers if `TEvent` matching the `query` is raised. If a `predicate` is also provided, it must also return `true`.
+    ```csharp
+    // Define a marker IParameter type for your specific query.
+    public class ItemTag : IParameter { }
+
+    // Event publishing (example of how the event would be set up elsewhere):
+    // var collectedEvent = new ItemCollectedEvent();
+    // collectedEvent.Set<ItemTag>("KeyCard"); // Set the string value with ItemTag as type key
+    // EventBus.Raise(collectedEvent);
+
+    // Fluent transition setup:
+    (stateA > stateB).On(
+        EventBus<ItemCollectedEvent>.Where<ItemTag>("KeyCard"), // Filter by the string value "KeyCard"
+        evt => evt.Collector.IsPlayer // Optional additional predicate on the event object
+    );
+    ```
+
+### `.On(ref Action signal)` or `.On<TActionParam>(ref Action<TActionParam> signal)` (for C# Actions)
+
+This defines a `TransitionByAction` that triggers when the provided C# `Action` or `Action<T>` delegate (signal) is invoked. The signal must be passed with the `ref` keyword.
+
+```csharp
+public Action PlayerJumped;
+public Action<int> PlayerScoredPoints;
+
+// ... in setup ...
+(groundedState > jumpingState).On(ref PlayerJumped);
+(anyState > scoreCelebrationState).On(ref PlayerScoredPoints);
+
+// ... elsewhere ...
+PlayerJumped?.Invoke();
+PlayerScoredPoints?.Invoke(100);
+```
+
+Future methods (like `.Immediately()`, etc.) will be added to this fluent API.
 
 ## Practical Usage Example (Character Controller)
 
