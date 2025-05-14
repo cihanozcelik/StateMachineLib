@@ -209,7 +209,7 @@ myState.At(2.5f, () => {
 
 Transitions define how the state machine moves from one `StateUnit` to another. `TransitionByAction` and `TransitionByEvent` directly trigger state changes, while the others are evaluated during the source state's `Update` loop.
 
-*   **`BasicTransition`**: 
+*   **`BasicTransition`**:
     *   **How:** Connects two states based on a predicate evaluating to true/false.
     *   **Trigger:** `predicate(elapsedTimeInState)` returns `true`.
     *   **Usage:** 
@@ -300,7 +300,7 @@ var transitionAlsoAB = (stateB < stateA); // (target < source) also configures s
 
 This returns a configurator struct. You then chain one of the following methods to define the transition logic:
 
-### `.When(Func<float, bool> predicate)`
+### `(fromState > toState).When(predicate)`:
 
 This defines a `BasicTransition` that triggers when the provided predicate returns `true`. The predicate receives the elapsed time in the source state.
 
@@ -315,7 +315,7 @@ StateUnit stateB = myGraph.CreateState();
 (stateB < stateA).When(elapsedTime => player.Health < 10 && elapsedTime > 1.0f);
 ```
 
-### `.After(float duration)`
+### `(fromState > toState).After(duration)`:
 
 This defines a `BasicTransition` that triggers after a specific `duration` (in seconds) has passed since the source state was entered.
 
@@ -327,7 +327,7 @@ StateUnit readyState = myGraph.CreateState();
 (loadingState > readyState).After(2.5f);
 ```
 
-### `.On<TEvent>(...)` (for EventBus Events)
+### `(fromState > toState).On<TEvent>(...) (for EventBus Events)`:
 
 This defines a `TransitionByEvent`. It has several overloads:
 
@@ -356,9 +356,9 @@ This defines a `TransitionByEvent`. It has several overloads:
     );
     ```
 
-### `.On(ref Action signal)` or `.On<TActionParam>(ref Action<TActionParam> signal)` (for C# Actions)
+### `(fromState > toState).On(ref signal) (for C# Actions)`:
 
-This defines a `TransitionByAction` that triggers when the provided C# `Action` or `Action<T>` delegate (signal) is invoked. The signal must be passed with the `ref` keyword.
+This defines a `TransitionByAction` that triggers when the provided C# `Action` or `Action<T>` delegate (signal) is invoked. The signal must be passed with the `ref` keyword. (The heading shows the parameterless version; `Action<TActionParam>` is also supported).
 
 ```csharp
 public Action PlayerJumped;
@@ -373,7 +373,7 @@ PlayerJumped?.Invoke();
 PlayerScoredPoints?.Invoke(100);
 ```
 
-### `.Immediately()`
+### `(fromState > toState).Immediately()`:
 
 This defines a `DirectTransition` that occurs unconditionally as soon as the source state is entered or updated, causing an immediate transition to the target state. It's useful for states that are purely transitional or serve as entry points that should immediately redirect.
 
@@ -385,7 +385,32 @@ StateUnit actualStartState = myGraph.CreateState();
 (entryPointState > actualStartState).Immediately();
 ```
 
-Future methods (like for conditional transitions) will be added to this fluent API.
+### `(fromState > targetStates).When(indexPredicate)`:
+
+You can define transitions from a single state to one of several possible target states based on an index returned by a condition function. This is useful for decision points where the next state depends on dynamic criteria.
+
+The `When` method, when used with an array of target `StateUnit`s, expects its predicate to return an integer.
+- If the integer is a valid index into the array of target states (0 to N-1), a transition to the state at that index occurs.
+- If the integer is -1 (or any out-of-bounds negative number), no transition occurs.
+
+```csharp
+StateUnit decisionState = myGraph.CreateState();
+StateUnit optionAState = myGraph.CreateState();
+StateUnit optionBState = myGraph.CreateState();
+StateUnit optionCState = myGraph.CreateState();
+
+// From decisionState, transition to one of the new[] { optionAState, ... } based on index
+(decisionState > new[] { optionAState, optionBState, optionCState }).When(elapsedTime => {
+    // Assuming 'player' and 'PlayerChoices' are defined elsewhere
+    // and 'elapsedTime' is the time since 'decisionState' became active.
+    if (player.Choice == PlayerChoices.A) return 0;       // Transition to optionAState
+    if (player.Choice == PlayerChoices.B) return 1;       // Transition to optionBState
+    if (elapsedTime > 10.0f && player.IsIdle) return 2; // Transition to optionCState
+    return -1;                                          // No transition
+});
+```
+
+Future methods (like for conditional transitions to a dynamically chosen single state) will be added to this fluent API.
 
 ## Practical Usage Example (Character Controller)
 
