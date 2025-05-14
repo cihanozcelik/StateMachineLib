@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 
 namespace Nopnag.StateMachineLib
@@ -9,9 +10,19 @@ namespace Nopnag.StateMachineLib
     StateUnit _currentUnit;
     readonly List<StateUnit> _units = new();
 
+    [Obsolete("Use CreateState() instead. If a name is needed, it should be managed by the user externally or via StateUnit properties if available.", false)]
     public StateUnit CreateUnit(string name)
     {
       var stateUnit = new StateUnit(name, this);
+      _units.Add(stateUnit);
+      if (InitialUnit == null) InitialUnit = stateUnit;
+
+      return stateUnit;
+    }
+
+    public StateUnit CreateState()
+    {
+      var stateUnit = new StateUnit(this);
       _units.Add(stateUnit);
       if (InitialUnit == null) InitialUnit = stateUnit;
 

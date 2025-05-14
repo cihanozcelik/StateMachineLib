@@ -761,5 +761,204 @@ namespace Nopnag.StateMachineLib.Tests
             yield return null;
             Assert.AreEqual(1, atEveryCallbackCount, "AtEvery did not continue correctly after catching up.");
         }
+
+        // --- Tests for New API --- 
+
+        [UnityTest]
+        public IEnumerator NewAPI_InitialState_EntersCorrectly_UsingCreateState()
+        {
+            var graph = _stateMachine.CreateGraph();
+            var s1 = graph.CreateState(); // New API
+            bool s1Entered = false;
+            s1.OnEnter = () => { s1Entered = true; }; // New API
+
+            graph.InitialUnit = s1; // Set initial unit for this graph
+            _stateMachine.Start(); // This will start all graphs, including the new one
+            yield return null; 
+
+            Assert.IsTrue(s1Entered, "Initial state (s1) created with CreateState() did not enter using OnEnter.");
+            Assert.IsTrue(graph.IsUnitActive(s1), "s1 should be active.");
+            // Assert.IsNull(graph.GetCurrentStateName(), "GetCurrentStateName should be null for states created with CreateState()."); 
+            // GetCurrentStateName will return the name of _currentUnit from _graphA if _graphA was also started.
+            // To test GetCurrentStateName accurately for this new graph, we might need to ensure only this graph is present or active.
+            // For now, let's focus on IsUnitActive and the OnEnter flag.
+        }
+
+        [UnityTest]
+        public IEnumerator NewAPI_StateFunctions_CalledCorrectly_UsingCreateState()
+        {
+            var graph = _stateMachine.CreateGraph(); // Use a fresh graph to avoid interference from _graphA if Start is called on _stateMachine
+            var s1 = graph.CreateState();
+            var s2 = graph.CreateState();
+
+            bool s1Entered = false, s1Updated = false, s1Exited = false;
+            int s1UpdateCount = 0;
+
+            s1.OnEnter = () => s1Entered = true;
+            s1.OnUpdate = (dt) => { s1Updated = true; s1UpdateCount++; }; 
+            s1.OnExit = () => s1Exited = true;
+
+            graph.InitialUnit = s1;
+            // We will call graph.EnterGraph() and graph.UpdateGraph() directly to isolate this graph for the test
+            // instead of _stateMachine.Start() and _stateMachine.UpdateMachine()
+
+            graph.EnterGraph();
+            yield return null; // For OnEnter
+
+            Assert.IsTrue(s1Entered, "s1.OnEnter was not called.");
+
+            graph.UpdateGraph();
+            yield return null; // For OnUpdate
+            Assert.IsTrue(s1Updated, "s1.OnUpdate was not called.");
+            Assert.AreEqual(1, s1UpdateCount, "s1.OnUpdate was called an incorrect number of times.");
+
+            graph.UpdateGraph(); // Call update again
+            yield return null;
+            Assert.AreEqual(2, s1UpdateCount, "s1.OnUpdate was not called a second time.");
+
+            BasicTransition.Connect(s1, s2, dt => true); // Transition immediately on next update check
+            graph.UpdateGraph(); // This should trigger transition, s1.OnExit, and s2.OnEnter
+            yield return null;
+
+            Assert.IsTrue(s1Exited, "s1.OnExit was not called.");
+        }
+
+        [UnityTest]
+        public IEnumerator NewAPI_OnEvent_Generic_OnlyWhileActive_UsingCreateState()
+        {
+            var graph = _stateMachine.CreateGraph();
+            var s1 = graph.CreateState();
+            var s2 = graph.CreateState(); // Another state to transition to
+            bool s1_TestEventAListenerCalled = false;
+
+            s1.OnEnter = () => Debug.Log("s1 entered for NewAPI_OnEvent_Generic");
+            s1.On<TestEventA>(evt => { s1_TestEventAListenerCalled = true; }); // New API
+            
+            graph.InitialUnit = s1;
+            graph.EnterGraph(); // Isolate graph
+            yield return null;
+
+            // Event raised while s1 is active
+            EventBus<TestEventA>.Raise(new TestEventA());
+            yield return null;
+            Assert.IsTrue(s1_TestEventAListenerCalled, "s1_TestEventAListenerCalled should be true after event raised while s1 active.");
+
+            // Transition to s2
+            s1_TestEventAListenerCalled = false; // Reset flag
+            BasicTransition.Connect(s1, s2, dt => true); // Immediate transition
+            graph.UpdateGraph(); // Process transition
+            yield return null;
+            Assert.IsTrue(graph.IsUnitActive(s2), "Should have transitioned to s2.");
+
+            // Event raised while s1 is NOT active (s2 is active)
+            EventBus<TestEventA>.Raise(new TestEventA());
+            yield return null;
+            Assert.IsFalse(s1_TestEventAListenerCalled, "s1_TestEventAListenerCalled should be false after event raised while s1 NOT active.");
+        }
+
+        public class TestEventWithParam : BusEvent 
+        { 
+            public int Value { get; set; }
+        }
+
+        public class IntParameter : IParameter
+        {
+            public int Value;
+
+            public override bool Equals(object obj)
+            {
+                return obj is IntParameter other && Value == other.Value;
+            }
+
+            public override int GetHashCode()
+            {
+                return Value.GetHashCode();
+            }
+        }
+
+        [UnityTest]
+        public IEnumerator NewAPI_OnEvent_WithEventQuery_OnlyWhileActiveAndMatchingParam_UsingCreateState()
+        {
+            var graph = _stateMachine.CreateGraph();
+            var s1 = graph.CreateState();
+            var s2 = graph.CreateState(); 
+            bool s1_QueryListenerCalled = false;
+            int targetValue = 5;
+
+            var matchingQueryParam = new IntParameter { Value = targetValue };
+            var query = EventBus<TestEventWithParam>.Where<IntParameter>(matchingQueryParam); // Use the IntParameter instance for the query
+            
+            s1.On<TestEventWithParam>(query, evt => { s1_QueryListenerCalled = true; }); // New API
+
+            graph.InitialUnit = s1;
+            graph.EnterGraph();
+            yield return null;
+
+            // Raise matching event while s1 active
+            var matchingEvent = new TestEventWithParam { Value = targetValue }; // Event can still hold its own value if needed
+            matchingEvent.Set(matchingQueryParam); // Attach the IParameter for the query system
+            EventBus<TestEventWithParam>.Raise(matchingEvent);
+            yield return null;
+            Assert.IsTrue(s1_QueryListenerCalled, "s1_QueryListenerCalled should be true for matching event while s1 active.");
+
+            // Raise non-matching event while s1 active (different IntParameter instance/value)
+            s1_QueryListenerCalled = false; // Reset
+            var nonMatchingQueryParam = new IntParameter { Value = targetValue + 1 };
+            var nonMatchingEvent = new TestEventWithParam { Value = targetValue + 1 }; 
+            nonMatchingEvent.Set(nonMatchingQueryParam); // Attach a different IParameter
+            EventBus<TestEventWithParam>.Raise(nonMatchingEvent);
+            yield return null;
+            Assert.IsFalse(s1_QueryListenerCalled, "s1_QueryListenerCalled should be false for non-matching event while s1 active.");
+
+            // Transition to s2
+            BasicTransition.Connect(s1, s2, dt => true);
+            graph.UpdateGraph();
+            yield return null;
+            Assert.IsTrue(graph.IsUnitActive(s2), "Should have transitioned to s2.");
+            s1_QueryListenerCalled = false; // Reset
+
+            // Raise matching event while s1 NOT active
+            var matchingEvent_S1Inactive = new TestEventWithParam { Value = targetValue };
+            matchingEvent_S1Inactive.Set(matchingQueryParam);
+            EventBus<TestEventWithParam>.Raise(matchingEvent_S1Inactive);
+            yield return null;
+            Assert.IsFalse(s1_QueryListenerCalled, "s1_QueryListenerCalled should be false for matching event while s1 NOT active.");
+        }
+
+        [UnityTest]
+        public IEnumerator NewAPI_OnSignal_RefAction_OnlyWhileActive_UsingCreateState()
+        {
+            var graph = _stateMachine.CreateGraph();
+            var s1 = graph.CreateState();
+            var s2 = graph.CreateState(); 
+            bool s1_SignalListenerCalled = false;
+            Action<string> testSignal = null; // The signal Action
+
+            s1.On(ref testSignal, (payload) => { 
+                s1_SignalListenerCalled = true; 
+                Debug.Log($"s1 received signal with payload: {payload}");
+            }); // New API
+
+            graph.InitialUnit = s1;
+            graph.EnterGraph();
+            yield return null;
+
+            // Invoke signal while s1 is active
+            testSignal?.Invoke("Hello from active state");
+            yield return null; 
+            Assert.IsTrue(s1_SignalListenerCalled, "s1_SignalListenerCalled should be true after signal invoked while s1 active.");
+
+            // Transition to s2
+            s1_SignalListenerCalled = false; // Reset flag
+            BasicTransition.Connect(s1, s2, dt => true); // Immediate transition
+            graph.UpdateGraph(); // Process transition
+            yield return null;
+            Assert.IsTrue(graph.IsUnitActive(s2), "Should have transitioned to s2.");
+
+            // Invoke signal while s1 is NOT active (s2 is active)
+            testSignal?.Invoke("Hello from inactive state");
+            yield return null;
+            Assert.IsFalse(s1_SignalListenerCalled, "s1_SignalListenerCalled should be false after signal invoked while s1 NOT active.");
+        }
     }
 } 

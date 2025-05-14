@@ -37,16 +37,57 @@ namespace Nopnag.StateMachineLib
     }
 
     public readonly StateGraph BaseGraph;
+
+    [Obsolete("Use OnEnter instead.", false)]
     public Action EnterStateFunction;
+    public Action OnEnter
+    {
+      get => EnterStateFunction;
+      set => EnterStateFunction = value;
+    }
 
+    [Obsolete("Use OnExit instead.", false)]
     public Action ExitStateFunction;
-    public Action<float> FixedUpdateStateFunction;
+    public Action OnExit
+    {
+      get => ExitStateFunction;
+      set => ExitStateFunction = value;
+    }
 
+    [Obsolete("Use OnFixedUpdate instead.", false)]
+    public Action<float> FixedUpdateStateFunction;
+    public Action<float> OnFixedUpdate
+    {
+      get => FixedUpdateStateFunction;
+      set => FixedUpdateStateFunction = value;
+    }
+
+    [Obsolete("Use OnLateUpdate instead.", false)]
     public Action<float> LateUpdateStateFunction;
+    public Action<float> OnLateUpdate
+    {
+      get => LateUpdateStateFunction;
+      set => LateUpdateStateFunction = value;
+    }
+
     public readonly string Name;
     public readonly List<IStateTransition> Transitions = new();
+
+    [Obsolete("Use OnUpdateBeforeTransitionCheck instead.", false)]
     public Action<float> UpdateStateBeforeTransitionCheckFunction;
+    public Action<float> OnUpdateBeforeTransitionCheck
+    {
+      get => UpdateStateBeforeTransitionCheckFunction;
+      set => UpdateStateBeforeTransitionCheckFunction = value;
+    }
+
+    [Obsolete("Use OnUpdate instead.", false)]
     public Action<float> UpdateStateFunction;
+    public Action<float> OnUpdate
+    {
+      get => UpdateStateFunction;
+      set => UpdateStateFunction = value;
+    }
 
     readonly List<ScheduledCallback> _scheduledCallbacks = new();
     readonly List<PeriodicCallback> _periodicCallbacks = new();
@@ -56,6 +97,11 @@ namespace Nopnag.StateMachineLib
     public StateUnit(string name, StateGraph graph)
     {
       Name = name;
+      BaseGraph = graph;
+    }
+    
+    public StateUnit(StateGraph graph)
+    {
       BaseGraph = graph;
     }
 
@@ -76,7 +122,7 @@ namespace Nopnag.StateMachineLib
       _periodicCallbacks.Add(new PeriodicCallback(intervalTime, callback));
     }
 
-    public bool CheckTransitions()
+    internal bool CheckTransitions()
     {
       // Debug.Log("Check transitions");
       StateUnit targetState;
@@ -92,13 +138,13 @@ namespace Nopnag.StateMachineLib
       return false;
     }
 
-    public void Exit()
+    internal void Exit()
     {
       _subGraph?.ExitGraph();
       ExitStateFunction?.Invoke();
     }
 
-    public void FixedUpdate()
+    internal void FixedUpdate()
     {
       FixedUpdateStateFunction?.Invoke(DeltaTimeSinceStart);
       _subGraph?.FixedUpdateGraph();
@@ -110,12 +156,12 @@ namespace Nopnag.StateMachineLib
       return _subGraph;
     }
 
-    public bool IsActive()
+    internal bool IsActive()
     {
       return BaseGraph.IsUnitActive(this);
     }
 
-    public void LateUpdate()
+    internal void LateUpdate()
     {
       LateUpdateStateFunction?.Invoke(DeltaTimeSinceStart);
       _subGraph?.LateUpdateGraph();
@@ -126,6 +172,7 @@ namespace Nopnag.StateMachineLib
     /// </summary>
     /// <typeparam name="T">The event type to listen for.</typeparam>
     /// <param name="listener">The callback to invoke when the event is raised and this state is active.</param>
+    [Obsolete("Use On<T>(listener) instead.", false)]
     public void Listen<T>(ListenerDelegate<T> listener) where T : BusEvent
     {
       EventBus<T>.Listen(
@@ -137,11 +184,22 @@ namespace Nopnag.StateMachineLib
     }
 
     /// <summary>
+    /// A synonym for Listen. Subscribes to events of type T from the EventBus, but only invokes the listener while this state is active.
+    /// </summary>
+    /// <typeparam name="T">The event type to listen for.</typeparam>
+    /// <param name="listener">The callback to invoke when the event is raised and this state is active.</param>
+    public void On<T>(ListenerDelegate<T> listener) where T : BusEvent
+    {
+        Listen(listener);
+    }
+
+    /// <summary>
     /// Subscribes to filtered events (via EventQuery) of type T from the EventBus, but only invokes the listener while this state is active.
     /// </summary>
     /// <typeparam name="T">The event type to listen for.</typeparam>
     /// <param name="query">The EventQuery to filter which events to listen for.</param>
     /// <param name="listener">The callback to invoke when the filtered event is raised and this state is active.</param>
+    [Obsolete("Use On<T>(query, listener) instead.", false)]
     public void Listen<T>(EventQuery<T> query, ListenerDelegate<T> listener) where T : BusEvent
     {
       query.Listen(
@@ -152,6 +210,18 @@ namespace Nopnag.StateMachineLib
       );
     }
 
+    /// <summary>
+    /// A synonym for Listen. Subscribes to filtered events (via EventQuery) of type T from the EventBus, but only invokes the listener while this state is active.
+    /// </summary>
+    /// <typeparam name="T">The event type to listen for.</typeparam>
+    /// <param name="query">The EventQuery to filter which events to listen for.</param>
+    /// <param name="listener">The callback to invoke when the filtered event is raised and this state is active.</param>
+    public void On<T>(EventQuery<T> query, ListenerDelegate<T> listener) where T : BusEvent
+    {
+        Listen(query, listener);
+    }
+
+    [Obsolete("Use On<T>() instead.", false)]
     public void ListenSignal<T>(ref Action<T> signal, Action<T> sensor)
     {
       signal += parameter =>
@@ -160,12 +230,24 @@ namespace Nopnag.StateMachineLib
       };
     }
 
+    /// <summary>
+    /// A synonym for ListenSignal. Subscribes a sensor Action to an external signal Action.
+    /// The sensor is only invoked if this StateUnit is active when the signal is raised.
+    /// </summary>
+    /// <typeparam name="T">The type of the parameter for the signal and sensor actions.</typeparam>
+    /// <param name="signal">The external signal Action to listen to (passed by reference).</param>
+    /// <param name="sensor">The Action to execute when the signal is raised and this state is active.</param>
+    public void On<T>(ref Action<T> signal, Action<T> sensor)
+    {
+      ListenSignal(ref signal, sensor);
+    }
+
     public void SetSubStateGraph(StateGraph subGraph)
     {
       _subGraph = subGraph;
     }
 
-    public void Start()
+    internal void Start()
     {
       _previousTime = Time.time;
       DeltaTimeSinceStart = 0;
@@ -191,7 +273,7 @@ namespace Nopnag.StateMachineLib
       CheckTransitions();
     }
 
-    public bool Update()
+    internal bool Update()
     {
       DeltaTimeSinceStart += (Time.time - _previousTime) * 1; // timescale here
       _previousTime = Time.time;
