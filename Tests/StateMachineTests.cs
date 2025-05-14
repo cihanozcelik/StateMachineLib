@@ -1207,5 +1207,29 @@ namespace Nopnag.StateMachineLib.Tests
             Assert.IsTrue(_state1Exited);
             Assert.IsTrue(_state2Entered);
         }
+
+        [UnityTest]
+        public IEnumerator FluentAPI_Immediately_Works()
+        {
+            var graph = _stateMachine.CreateGraph();
+            var s1 = graph.CreateState();
+            var s2 = graph.CreateState();
+            bool s1Exited = false, s2Entered = false;
+
+            s1.OnExit = () => s1Exited = true;
+            s2.OnEnter = () => s2Entered = true;
+
+            // New Fluent API for DirectTransition
+            (s1 > s2).Immediately();
+
+            graph.InitialUnit = s1;
+            graph.EnterGraph(); // Start should trigger Enter and immediate transition check
+            // graph.UpdateGraph(); // An update might be needed if EnterGraph doesn't check transitions
+            yield return null; // Wait a frame for the transition to occur
+
+            Assert.IsTrue(graph.IsUnitActive(s2), "Did not transition to s2 using fluent .Immediately() API.");
+            Assert.IsTrue(s1Exited, "s1 did not exit after fluent .Immediately() API transition.");
+            Assert.IsTrue(s2Entered, "s2 did not enter after fluent .Immediately() API transition.");
+        }
     }
 } 

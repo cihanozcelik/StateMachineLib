@@ -109,7 +109,6 @@ namespace Nopnag.StateMachineLib
             TransitionByAction.Connect<TActionParam>(FromState, ToState, ref signal);
         }
         
-        // Overload for parameterless Action for TransitionByAction
         /// <summary>
         /// Creates a TransitionByAction that occurs when the specified parameterless signal Action is invoked.
         /// </summary>
@@ -118,6 +117,19 @@ namespace Nopnag.StateMachineLib
         {
             if (FromState == null || ToState == null) { UnityEngine.Debug.LogError(ErrorMessage); return; }
             TransitionByAction.Connect(FromState, ToState, ref signal);
+        }
+
+        /// <summary>
+        /// Creates a DirectTransition that occurs unconditionally and immediately.
+        /// </summary>
+        public void Immediately()
+        {
+            if (FromState == null || ToState == null)
+            {
+                UnityEngine.Debug.LogError("TransitionConfigurator: Source and target states must be configured before defining an immediate transition.");
+                return;
+            }
+            DirectTransition.Connect(FromState, ToState);
         }
 
         private const string ErrorMessage = "TransitionConfigurator: Source and target states must be configured before defining the condition.";

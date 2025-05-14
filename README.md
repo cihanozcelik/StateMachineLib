@@ -373,7 +373,19 @@ PlayerJumped?.Invoke();
 PlayerScoredPoints?.Invoke(100);
 ```
 
-Future methods (like `.Immediately()`, etc.) will be added to this fluent API.
+### `.Immediately()`
+
+This defines a `DirectTransition` that occurs unconditionally as soon as the source state is entered or updated, causing an immediate transition to the target state. It's useful for states that are purely transitional or serve as entry points that should immediately redirect.
+
+```csharp
+StateUnit entryPointState = myGraph.CreateState();
+StateUnit actualStartState = myGraph.CreateState();
+
+// From entryPointState, immediately go to actualStartState
+(entryPointState > actualStartState).Immediately();
+```
+
+Future methods (like for conditional transitions) will be added to this fluent API.
 
 ## Practical Usage Example (Character Controller)
 
