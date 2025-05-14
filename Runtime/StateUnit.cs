@@ -323,5 +323,19 @@ namespace Nopnag.StateMachineLib
         }
       }
     }
+
+    // Overload for operator > to initiate fluent transition definition
+    public static SingleTargetTransitionConfigurator operator >(StateUnit fromState, StateUnit toState)
+    {
+        return new SingleTargetTransitionConfigurator(fromState, toState);
+    }
+
+    // Matching operator < to satisfy CS0216. 
+    // (target < source) is equivalent to (source > target)
+    public static SingleTargetTransitionConfigurator operator <(StateUnit toState, StateUnit fromState)
+    {
+        // We ensure that FromState is always the left operand of > or right operand of < conceptually
+        return new SingleTargetTransitionConfigurator(fromState, toState);
+    }
   }
 }

@@ -960,5 +960,68 @@ namespace Nopnag.StateMachineLib.Tests
             yield return null;
             Assert.IsFalse(s1_SignalListenerCalled, "s1_SignalListenerCalled should be false after signal invoked while s1 NOT active.");
         }
+
+        // --- Tests for Fluent Transition API ---
+
+        [UnityTest]
+        public IEnumerator FluentAPI_When_WorksAfterTime_UsingOperatorGreaterThan()
+        {
+            var graph = _stateMachine.CreateGraph(); // Use a fresh graph
+            var s1 = graph.CreateState();
+            var s2 = graph.CreateState();
+            bool s1Exited = false, s2Entered = false;
+
+            s1.OnExit = () => s1Exited = true;
+            s2.OnEnter = () => s2Entered = true;
+
+            float transitionTime = 0.1f;
+            // New Fluent API for BasicTransition
+            (s1 > s2).When(elapsedTime => elapsedTime >= transitionTime);
+
+            graph.InitialUnit = s1;
+            graph.EnterGraph(); // Isolate graph for this test
+            Assert.IsTrue(graph.IsUnitActive(s1));
+            yield return null; // Let initial Enter run
+
+            // Wait slightly longer than the required transition time
+            yield return new WaitForSeconds(transitionTime + 0.02f); 
+
+            graph.UpdateGraph(); 
+            yield return null; // Allow Enter/Exit logic of the new state to run
+
+            Assert.IsTrue(graph.IsUnitActive(s2), "Did not transition to s2 using fluent API after waiting.");
+            Assert.IsTrue(s1Exited, "s1 did not exit after fluent API transition.");
+            Assert.IsTrue(s2Entered, "s2 did not enter after fluent API transition.");
+        }
+
+        [UnityTest]
+        public IEnumerator FluentAPI_When_WorksAfterTime_UsingOperatorLessThan()
+        {
+            var graph = _stateMachine.CreateGraph(); 
+            var s1_source = graph.CreateState(); // Source
+            var s2_target = graph.CreateState(); // Target
+            bool s1Exited = false, s2Entered = false;
+
+            s1_source.OnExit = () => s1Exited = true;
+            s2_target.OnEnter = () => s2Entered = true;
+
+            float transitionTime = 0.1f;
+            // New Fluent API using < operator: (target < source)
+            (s2_target < s1_source).When(elapsedTime => elapsedTime >= transitionTime);
+
+            graph.InitialUnit = s1_source;
+            graph.EnterGraph(); 
+            Assert.IsTrue(graph.IsUnitActive(s1_source));
+            yield return null; 
+
+            yield return new WaitForSeconds(transitionTime + 0.02f); 
+
+            graph.UpdateGraph(); 
+            yield return null; 
+
+            Assert.IsTrue(graph.IsUnitActive(s2_target), "Did not transition to s2_target using fluent API with < operator after waiting.");
+            Assert.IsTrue(s1Exited, "s1_source did not exit after fluent API transition with < operator.");
+            Assert.IsTrue(s2Entered, "s2_target did not enter after fluent API transition with < operator.");
+        }
     }
 } 
