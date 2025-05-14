@@ -410,6 +410,29 @@ StateUnit optionCState = myGraph.CreateState();
 });
 ```
 
+### `(fromState > StateGraph.DynamicTarget).When(dynamicTargetPredicate)`:
+
+This defines a `ConditionalTransition` where the target state is determined at runtime by the `dynamicTargetPredicate`. This is the fluent equivalent of the static `ConditionalTransition.Connect(fromState, dynamicTargetPredicate)` method.
+
+You initiate this by transitioning from a state to the special `StateGraph.DynamicTarget` marker. The subsequent `.When()` method then takes a predicate of type `Func<float, StateUnit>`.
+
+-   **`dynamicTargetPredicate`**: A function that receives the elapsed time in the source state and should return:
+    -   A non-null `StateUnit` to transition to that state.
+    -   `null` to indicate that no transition should occur at this time.
+
+```csharp
+StateUnit patrollingState = myGraph.CreateState();
+StateUnit chasingState = myGraph.CreateState();
+StateUnit investigatingState = myGraph.CreateState();
+
+// From patrollingState, transition to a dynamically chosen state
+(patrollingState > StateGraph.DynamicTarget).When(elapsedTime => {
+    if (CanSeePlayer()) return chasingState;
+    if (HeardNoise()) return investigatingState;
+    return null; // Stay in patrolling state
+});
+```
+
 Future methods (like for conditional transitions to a dynamically chosen single state) will be added to this fluent API.
 
 ## Practical Usage Example (Character Controller)

@@ -1224,12 +1224,70 @@ namespace Nopnag.StateMachineLib.Tests
 
             graph.InitialUnit = s1;
             graph.EnterGraph(); // Start should trigger Enter and immediate transition check
-            // graph.UpdateGraph(); // An update might be needed if EnterGraph doesn't check transitions
             yield return null; // Wait a frame for the transition to occur
 
             Assert.IsTrue(graph.IsUnitActive(s2), "Did not transition to s2 using fluent .Immediately() API.");
             Assert.IsTrue(s1Exited, "s1 did not exit after fluent .Immediately() API transition.");
             Assert.IsTrue(s2Entered, "s2 did not enter after fluent .Immediately() API transition.");
+        }
+
+        [UnityTest]
+        public IEnumerator FluentAPI_ConditionalTransition_DynamicTarget_SelectsCorrectState()
+        {
+            StateUnit targetStateFromPredicate = null;
+
+            // Fluent API equivalent of ConditionalTransition.Connect(_state1, predicate)
+            (_state1 > StateGraph.DynamicTarget).When(elapsedTime => targetStateFromPredicate);
+
+            _stateMachine.Start(); // _state1 is the initial state from Setup
+            yield return null;
+            Assert.IsTrue(_graphA.IsUnitActive(_state1), "Initial: Should be in State1.");
+            Assert.IsTrue(_state1Entered, "Initial: State1.OnEnter should have run.");
+            Assert.IsFalse(_state1Exited, "Initial: State1.OnExit should not have run.");
+
+            // --- Test transition to _state2 ---
+            bool s1ExitedForS2 = false, s2EnteredForS2 = false;
+            _state1.OnExit = () => s1ExitedForS2 = true;
+            _state2.OnEnter = () => s2EnteredForS2 = true;
+            // Reset other flags that might have been set by Setup or previous parts if this test were more complex
+            _state1Entered = false; // Reset since Setup already ran it.
+            _state2Exited = false; 
+
+            targetStateFromPredicate = _state2;
+            _stateMachine.UpdateMachine();
+            yield return null;
+            Assert.IsTrue(_graphA.IsUnitActive(_state2), "To State2: Did not transition to State2.");
+            Assert.IsTrue(s1ExitedForS2, "To State2: State1.OnExit did not run.");
+            Assert.IsTrue(s2EnteredForS2, "To State2: State2.OnEnter did not run.");
+
+            // --- Reset and transition to _state3 ---
+            _stateMachine.Exit(); // Exits current state (_state2)
+            yield return null;
+
+            // Reset flags for next phase
+            _graphA.InitialUnit = _state1; // Explicitly reset initial state for the graph
+            s1ExitedForS2 = false; 
+            s2EnteredForS2 = false;
+            bool s1ExitedForS3 = false, s3EnteredForS3 = false;
+            _state1.OnEnter = () => { _state1Entered = true; }; // Re-assign OnEnter to track re-entry
+            _state1.OnExit = () => s1ExitedForS3 = true;
+            _state2.OnEnter = null; // Clear previous test-specific assignment
+            _state3.OnEnter = () => s3EnteredForS3 = true;
+            _state1Entered = false; // For the upcoming Start()
+
+            targetStateFromPredicate = null; // Ensure no immediate transition on Start()
+            _stateMachine.Start(); // Re-enters _state1
+            yield return null;
+            Assert.IsTrue(_graphA.IsUnitActive(_state1), "To State3 Reset: Should be in State1 after reset.");
+            Assert.IsTrue(_state1Entered, "To State3 Reset: State1.OnEnter should have run on restart.");
+            Assert.IsFalse(s1ExitedForS3, "To State3 Reset: State1.OnExit should not have run yet.");
+
+            targetStateFromPredicate = _state3;
+            _stateMachine.UpdateMachine();
+            yield return null;
+            Assert.IsTrue(_graphA.IsUnitActive(_state3), "To State3: Did not transition to State3.");
+            Assert.IsTrue(s1ExitedForS3, "To State3: State1.OnExit did not run for S3 transition.");
+            Assert.IsTrue(s3EnteredForS3, "To State3: State3.OnEnter did not run.");
         }
     }
 } 

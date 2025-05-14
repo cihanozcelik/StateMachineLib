@@ -337,5 +337,30 @@ namespace Nopnag.StateMachineLib
         // We ensure that FromState is always the left operand of > or right operand of < conceptually
         return new SingleTargetTransitionConfigurator(fromState, toState);
     }
+
+    // Operators for MultiTargetTransitionConfigurator
+    public static MultiTargetTransitionConfigurator operator >(StateUnit from, StateUnit[] to)
+    {
+        return new MultiTargetTransitionConfigurator(from, to);
+    }
+
+    public static MultiTargetTransitionConfigurator operator <( StateUnit to, StateUnit[] from)
+    {
+      throw new NotSupportedException("The syntax 'StateUnit < StateUnit[]' is not supported");
+    }
+    
+    public static DynamicTargetTransitionConfigurator operator >(StateUnit sourceUnit, DynamicTargetMarker dynamicMarker)
+    {
+        if (sourceUnit == null) throw new ArgumentNullException(nameof(sourceUnit));
+        // The dynamicMarker parameter itself serves as the type check. 
+        // No explicit check against StateGraph.DynamicTarget is needed here due to strong typing.
+        return new DynamicTargetTransitionConfigurator(sourceUnit);
+    }
+    public static DynamicTargetTransitionConfigurator operator <(StateUnit sourceUnit, DynamicTargetMarker dynamicMarker)
+    { 
+        // This syntax (e.g., sourceUnit < StateGraph.DynamicTarget) is not meaningful for this fluent API.
+        // StateGraph.DynamicTarget is intended to be used on the right side of the '>' operator.
+        throw new NotSupportedException("The syntax 'StateUnit < DynamicTargetMarker' is not supported for defining dynamic transitions. Use 'StateUnit > StateGraph.DynamicTarget'.");
+    }
   }
 }
