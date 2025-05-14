@@ -29,41 +29,75 @@ StateMachineLib provides tools to structure application logic into distinct stat
 *   **`StateGraph`**: Represents a single state machine graph. It manages a collection of `StateUnit` instances, keeps track of the `CurrentUnit`, and handles entering/exiting the graph and starting specific states.
     ```csharp
     StateGraph mainGraph = stateMachine.CreateGraph();
+    
+    // Creating states:
+    StateUnit unnamedState = mainGraph.CreateState(); // Preferred: Creates a state (name will be null by default).
+    // StateUnit namedState = mainGraph.CreateUnit("MyNamedState"); // Deprecated: Creates a state with a specific name.
     ```
 
-*   **`StateUnit`**: Represents a single state within a `StateGraph`. You assign behavior to it by setting its various `Action` delegates (e.g., `EnterStateFunction`, `UpdateStateFunction`). It contains a list of potential `Transitions` which are checked during its `Update` loop.
+*   **`StateUnit`**: Represents a single state within a `StateGraph`. You assign behavior to it by setting its various `Action` properties (e.g., `OnEnter`, `OnUpdate`). The older `Action`-suffixed fields (e.g., `EnterStateFunction`) are now deprecated. It contains a list of potential `Transitions` which are checked during its `Update` loop.
     ```csharp
-    StateUnit idleState = mainGraph.CreateUnit("Idle");
-    idleState.EnterStateFunction = () => Debug.Log("Idling...");
-    idleState.UpdateStateFunction = (deltaTime) => { /* Do idle stuff */ };
+    // Using preferred CreateState():
+    StateUnit idleState = mainGraph.CreateState(); 
+    // If you need to identify the state for debugging/logging, you can manage that externally or rely on its object reference.
+    // idleState.Name will be null if created with CreateState().
+
+    // If using the deprecated CreateUnit(name) for legacy reasons or specific identification:
+    // StateUnit namedIdleState = mainGraph.CreateUnit("Idle"); 
+    // namedIdleState.Name will be "Idle".
+
+    idleState.OnEnter = () => Debug.Log("Idling..."); // Preferred way to assign actions
+    idleState.OnUpdate = (deltaTime) => { /* Do idle stuff */ }; // Preferred
+    
+    // Older, deprecated way of assigning actions:
+    // idleState.EnterStateFunction = () => Debug.Log("Idling..."); 
+    // idleState.UpdateStateFunction = (deltaTime) => { /* Do idle stuff */ };
     ```
 
 *   **`IStateTransition`**: The interface for all transition types. Defines the `CheckTransition` method, which determines if a transition should occur and outputs the target `StateUnit`.
 
-## Listening to Events Only While a State is Active
+## Listening to Events & Signals Only While a State is Active
 
-A powerful feature of StateMachineLib is the ability to listen to events only while a specific state is active. This is achieved using the `StateUnit.Listen` method:
+A powerful feature of StateMachineLib is the ability to listen to `EventBusLib` events or standard C# `Action` signals only while a specific state is active. This is achieved using the `StateUnit.On` methods. The older `Listen` and `ListenSignal` methods are now deprecated.
 
-### Basic Usage
+### EventBus Event Listening (Basic Usage)
 ```csharp
 // Listen to all MyEvent events, but only while this state is active
-myState.Listen<MyEvent>(evt => {
+// myState.Listen<MyEvent>(...); // Deprecated
+myState.On<MyEvent>(evt => { // Preferred
     Debug.Log($"MyEvent received in state: {myState.Name}");
 });
 ```
 
-### Parameter-Filtered Listening (with EventQuery)
+### EventBus Event Listening (Parameter-Filtered with EventQuery)
 ```csharp
 // Listen to MyEvent events with a specific parameter, only while this state is active
 var query = EventBus<MyEvent>.Where<MyParam>(myValue);
-myState.Listen(query, evt => {
-    Debug.Log($"MyEvent with param received in state: {myState.Name}");
+// myState.Listen(query, ...); // Deprecated
+myState.On(query, evt => { // Preferred
+    Debug.Log($"MyEvent with param received in state: {myState.Name}\");
 });
+```
+
+### C# Action Signal Listening
+You can also listen to a standard C# `Action<T>` signal. The provided sensor action will only execute if the state is active when the signal is invoked.
+```csharp
+public Action<float> PlayerScoreChanged;
+
+// In state setup:
+// myState.ListenSignal(ref PlayerScoreChanged, ...); // Deprecated
+myState.On(ref PlayerScoreChanged, score => { // Preferred
+    Debug.Log($"Player score changed to {score} while state {myState.Name} is active.");
+    // Perform actions specific to this state based on the score change
+});
+
+// Elsewhere in your code, when the score changes:
+PlayerScoreChanged?.Invoke(newScore);
 ```
 
 **Why is this important?**
 - The callback is only invoked if the state is currently active, so you don't need to manually unsubscribe or check state inside the handler.
-- With the EventQuery overload, you can listen to only a subset of events (e.g., only those with a certain parameter value), making your state logic more precise and efficient.
+- With the `EventQuery` overload for EventBus events, you can listen to only a subset of events (e.g., only those with a certain parameter value), making your state logic more precise and efficient.
 
 ## Advanced Features
 
@@ -100,13 +134,13 @@ A `StateUnit` can contain its own nested `StateGraph`, allowing for more complex
 ```csharp
 // In your setup
 StateGraph mainGraph = stateMachine.CreateGraph();
-StateUnit combatState = mainGraph.CreateUnit("Combat");
-StateUnit patrollingState = mainGraph.CreateUnit("Patrolling");
+StateUnit combatState = mainGraph.CreateState();
+StateUnit patrollingState = mainGraph.CreateState();
 
 // Create a subgraph for detailed combat logic
 StateGraph combatSubgraph = new StateGraph(); 
-StateUnit aimingState = combatSubgraph.CreateUnit("Aiming");
-StateUnit shootingState = combatSubgraph.CreateUnit("Shooting");
+StateUnit aimingState = combatSubgraph.CreateState();
+StateUnit shootingState = combatSubgraph.CreateState();
 // ... define transitions within combatSubgraph ...
 
 // Assign the subgraph to the parent state
@@ -121,7 +155,7 @@ TransitionByEvent.Connect<EnemyDetectedEvent>(patrollingState, combatState);
 stateMachine.Start();
 
 // When patrollingState transitions to combatState:
-// 1. combatState.EnterStateFunction runs.
+// 1. combatState.OnEnter runs (previously EnterStateFunction).
 // 2. combatSubgraph.EnterGraph() runs, starting its initial state (e.g., aimingState).
 // 3. While combatState is active, combatSubgraph is updated via combatState's Update/FixedUpdate/LateUpdate.
 ```
@@ -137,9 +171,9 @@ Schedules an `Action` to be invoked once when `DeltaTimeSinceStart` reaches or e
 **Usage:**
 
 ```csharp
-StateUnit preparingState = mainGraph.CreateUnit("Preparing");
+StateUnit preparingState = mainGraph.CreateState();
 
-preparingState.EnterStateFunction = () => Debug.Log("Preparing action...");
+preparingState.OnEnter = () => Debug.Log("Preparing action..."); // Preferred
 
 // After 3 seconds in PreparingState, log a message
 preparingState.At(3.0f, () => {
@@ -154,9 +188,9 @@ Schedules an `Action` to be invoked repeatedly at specified `intervalTime` perio
 **Usage:**
 
 ```csharp
-StateUnit activeState = mainGraph.CreateUnit("Active");
+StateUnit activeState = mainGraph.CreateState();
 
-activeState.EnterStateFunction = () => Debug.Log("ActiveState started. Monitoring...");
+activeState.OnEnter = () => Debug.Log("ActiveState started. Monitoring..."); // Preferred
 
 // Every 5 seconds, print a monitoring message
 activeState.AtEvery(5.0f, () => {
@@ -286,33 +320,33 @@ public class CharacterController : MonoBehaviour
         movementGraph = stateMachine.CreateGraph();
 
         // --- 1. Define States ---
-        idleState = movementGraph.CreateUnit("Idle");
-        movingState = movementGraph.CreateUnit("Moving");
-        jumpingState = movementGraph.CreateUnit("Jumping");
-        stunnedState = movementGraph.CreateUnit("Stunned"); 
+        idleState = movementGraph.CreateState();
+        movingState = movementGraph.CreateState();
+        jumpingState = movementGraph.CreateState();
+        stunnedState = movementGraph.CreateState(); 
 
         // --- 2. Assign State Logic ---
-        idleState.EnterStateFunction = () => { 
+        idleState.OnEnter = () => { 
             Debug.Log("Entering Idle State"); 
         };
-        idleState.UpdateStateFunction = (dt) => { /* Maybe play idle animation */ };
+        idleState.OnUpdate = (dt) => { /* Maybe play idle animation */ };
         
-        movingState.EnterStateFunction = () => Debug.Log("Entering Moving State");
-        movingState.UpdateStateFunction = (dt) => 
+        movingState.OnEnter = () => Debug.Log("Entering Moving State");
+        movingState.OnUpdate = (dt) => 
         { 
             // Apply movement force based on input (simplified)
             Vector3 moveDir = GetMovementInput(); 
             rb.AddForce(moveDir * 10f);
         };
 
-        jumpingState.EnterStateFunction = () => 
+        jumpingState.OnEnter = () => 
         {
             Debug.Log("Entering Jumping State");
             rb.AddForce(Vector3.up * jumpForce, ForceMode.Impulse);
         };
         
-        stunnedState.EnterStateFunction = () => Debug.Log("Entering Stunned State");
-        stunnedState.UpdateStateFunction = (dt) => { /* Maybe play stunned animation */ };
+        stunnedState.OnEnter = () => Debug.Log("Entering Stunned State");
+        stunnedState.OnUpdate = (dt) => { /* Maybe play stunned animation */ };
 
         // --- 3. Define Transitions --- 
 
