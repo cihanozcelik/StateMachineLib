@@ -282,6 +282,53 @@ Transitions define how the state machine moves from one `StateUnit` to another. 
             evt => evt.EnemyType == Enemy.EliteGuard);
         ```
 
+## Fluent Transition API (Alternative Syntax)
+
+As an alternative to the static `Connect` methods on transition types, a more fluent syntax is available for defining transitions directly from `StateUnit` instances. This API uses operator overloading (`>` and `<`) and chained method calls.
+
+This fluent approach is designed with structs to minimize garbage generation during transition setup.
+
+**Initiating a Transition:**
+
+You can start defining a transition using the `>` operator between a source and a target state, or the `<` operator between a target and a source state. Both achieve the same result of setting up a transition from the source to the target.
+
+```csharp
+// These are equivalent ways to start defining a transition from stateA to stateB:
+var transitionAB = (stateA > stateB); 
+var transitionAlsoAB = (stateB < stateA); // (target < source) also configures source -> target
+```
+
+This returns a configurator struct. You then chain one of the following methods to define the transition logic:
+
+### `.When(Func<float, bool> predicate)`
+
+This defines a `BasicTransition` that triggers when the provided predicate returns `true`. The predicate receives the elapsed time in the source state.
+
+```csharp
+StateUnit stateA = myGraph.CreateState();
+StateUnit stateB = myGraph.CreateState();
+
+// Transition from stateA to stateB when health is low after 1 second
+(stateA > stateB).When(elapsedTime => player.Health < 10 && elapsedTime > 1.0f);
+
+// Equivalent using the < operator
+(stateB < stateA).When(elapsedTime => player.Health < 10 && elapsedTime > 1.0f);
+```
+
+### `.After(float duration)`
+
+This defines a `BasicTransition` that triggers after a specific `duration` (in seconds) has passed since the source state was entered.
+
+```csharp
+StateUnit loadingState = myGraph.CreateState();
+StateUnitreadyState = myGraph.CreateState();
+
+// Transition from loadingState to readyState after 2.5 seconds
+(loadingState > readyState).After(2.5f);
+```
+
+Future methods (like `.On<Event>()`, `.Immediately()`, etc.) will be added to this fluent API.
+
 ## Practical Usage Example (Character Controller)
 
 This example demonstrates a character controller with Idle, Moving, Jumping, and Stunned states, using various transitions.

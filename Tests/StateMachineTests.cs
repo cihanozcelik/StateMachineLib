@@ -1023,5 +1023,41 @@ namespace Nopnag.StateMachineLib.Tests
             Assert.IsTrue(s1Exited, "s1_source did not exit after fluent API transition with < operator.");
             Assert.IsTrue(s2Entered, "s2_target did not enter after fluent API transition with < operator.");
         }
+
+        [UnityTest]
+        public IEnumerator FluentAPI_After_WorksAfterDuration()
+        {
+            var graph = _stateMachine.CreateGraph(); 
+            var s1 = graph.CreateState();
+            var s2 = graph.CreateState();
+            bool s1Exited = false, s2Entered = false;
+
+            s1.OnExit = () => s1Exited = true;
+            s2.OnEnter = () => s2Entered = true;
+
+            float transitionDuration = 0.1f;
+            (s1 > s2).After(transitionDuration);
+
+            graph.InitialUnit = s1;
+            graph.EnterGraph(); 
+            Assert.IsTrue(graph.IsUnitActive(s1));
+            yield return null; 
+
+            // Check it doesn't transition before time
+            yield return new WaitForSeconds(transitionDuration * 0.5f); 
+            graph.UpdateGraph();
+            yield return null;
+            Assert.IsTrue(graph.IsUnitActive(s1), "Transitioned with .After() too early.");
+            Assert.IsFalse(s2Entered, "s2 entered too early.");
+
+            // Wait for the full duration + a bit
+            yield return new WaitForSeconds((transitionDuration * 0.5f) + 0.02f); 
+            graph.UpdateGraph(); 
+            yield return null; 
+
+            Assert.IsTrue(graph.IsUnitActive(s2), "Did not transition to s2 using fluent .After() API after waiting.");
+            Assert.IsTrue(s1Exited, "s1 did not exit after fluent .After() API transition.");
+            Assert.IsTrue(s2Entered, "s2 did not enter after fluent .After() API transition.");
+        }
     }
 } 
