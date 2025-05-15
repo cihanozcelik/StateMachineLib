@@ -2,7 +2,7 @@ using System;
 using Nopnag.EventBusLib;
 using Nopnag.StateMachineLib.Transition;
 
-namespace Nopnag.StateMachineLib
+namespace Nopnag.StateMachineLib.Util
 {
     /// <summary>
     /// Configures a transition.

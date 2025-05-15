@@ -2,6 +2,7 @@ using System;
 using System.Collections;
 using Nopnag.EventBusLib;
 using Nopnag.StateMachineLib.Transition;
+using Nopnag.StateMachineLib.Util; // Added for marker and configurator types
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.TestTools;

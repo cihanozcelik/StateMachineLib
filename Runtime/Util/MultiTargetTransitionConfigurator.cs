@@ -3,7 +3,7 @@ using System.Linq;
 using Nopnag.StateMachineLib.Transition; // For ConditionalTransitionByIndex
 using UnityEngine; // For Debug.LogError
 
-namespace Nopnag.StateMachineLib
+namespace Nopnag.StateMachineLib.Util
 {
     /// <summary>
     /// Configures a transition from a single source state to one of multiple potential target states,

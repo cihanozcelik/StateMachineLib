@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using Nopnag.StateMachineLib.Transition;
+using Nopnag.StateMachineLib.Util; // Added for marker and configurator types
 // using Nopnag.StateMachine.Runtime; // Removed incorrect using
 // No specific using needed if AnyStateMarker is in Nopnag.StateMachineLib
 

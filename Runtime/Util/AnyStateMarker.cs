@@ -1,4 +1,4 @@
-namespace Nopnag.StateMachineLib
+namespace Nopnag.StateMachineLib.Util
 {
     /// <summary>
     /// A marker type used with StateGraph.Any to denote the source of an "Any State" transition via operator overloading.

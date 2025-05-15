@@ -1,7 +1,7 @@
 using System;
 using Nopnag.StateMachineLib.Transition;
 
-namespace Nopnag.StateMachineLib
+namespace Nopnag.StateMachineLib.Util
 {
     /// <summary>
     /// Configures a transition where the target state is determined dynamically at runtime.
