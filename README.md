@@ -82,6 +82,17 @@ subGraph.InitialUnit = childState1; // Set initial state for the subgraph
 (state1 > StateGraph.DynamicTarget).When(
     elapsedTime => elapsedTime > 4.0f ? state2 : (elapsedTime > 1.0f ? state3 : null) 
     ); // Ex: to state2 if >4s, to state3 if >1s, else no change
+
+// 7. Transitions from "Any State"
+// These transitions can occur from any active state within the graph.
+// They are evaluated with higher priority than regular state-to-state transitions.
+// Assumes: StateUnit state3; MyGameEvent etc. defined as in previous examples.
+
+// Define "Any State" transitions using the (StateGraph.Any > targetState) operator syntax:
+(StateGraph.Any > state3).When(elapsedTime => SomeGlobalCondition());
+(StateGraph.Any > state3).On<MyGameEvent>(evt => evt.Value > 10);
+// This syntax supports .When(), .After(), .On<Event>(), .On(ref Action), .Immediately() etc.,
+// just like regular state-to-state transitions.
 ```
 
 ## Key Features

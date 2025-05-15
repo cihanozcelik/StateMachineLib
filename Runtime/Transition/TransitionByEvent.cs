@@ -3,47 +3,145 @@ using Nopnag.EventBusLib;
 
 namespace Nopnag.StateMachineLib.Transition
 {
-  public class TransitionByEvent
+  /// <summary>
+  /// Provides static methods to connect state transitions to EventBus events.
+  /// These transitions are push-based and occur immediately when a relevant event is raised,
+  /// bypassing the typical polling CheckTransition loop.
+  /// </summary>
+  public static class TransitionByEvent // Kept static as per original design
   {
-    public static void Connect<T>(StateUnit baseUnit, StateUnit targetUnit) where T : BusEvent
+    // --- Transitions from a specific StateUnit ---
+    public static void Connect<T>(StateUnit sourceUnit, StateUnit targetUnit) where T : BusEvent
     {
+      if (sourceUnit == null) throw new ArgumentNullException(nameof(sourceUnit));
+      if (targetUnit == null) throw new ArgumentNullException(nameof(targetUnit));
       EventBus<T>.Listen(
         @event =>
         {
-          if (baseUnit.IsActive()) baseUnit.BaseGraph.StartState(targetUnit);
+          if (sourceUnit.BaseGraph != null && sourceUnit.BaseGraph.IsUnitActive(sourceUnit)) 
+          {
+            sourceUnit.BaseGraph.StartState(targetUnit);
+          }
         }
       );
     }
 
-    public static void Connect<T>(StateUnit baseUnit, StateUnit targetUnit, Func<T, bool> predicate)
+    public static void Connect<T>(StateUnit sourceUnit, StateUnit targetUnit, Func<T, bool> predicate)
       where T : BusEvent
     {
+      if (sourceUnit == null) throw new ArgumentNullException(nameof(sourceUnit));
+      if (targetUnit == null) throw new ArgumentNullException(nameof(targetUnit));
+      if (predicate == null) throw new ArgumentNullException(nameof(predicate));
       EventBus<T>.Listen(
         @event =>
         {
-          if (baseUnit.IsActive() && predicate(@event)) baseUnit.BaseGraph.StartState(targetUnit);
+          if (sourceUnit.BaseGraph != null && sourceUnit.BaseGraph.IsUnitActive(sourceUnit) && predicate(@event)) 
+          {
+            sourceUnit.BaseGraph.StartState(targetUnit);
+          }
         }
       );
     }
 
-    public static void Connect<T>(StateUnit baseUnit, StateUnit targetUnit, EventQuery<T> query)
+    public static void Connect<T>(StateUnit sourceUnit, StateUnit targetUnit, EventQuery<T> query)
       where T : BusEvent
     {
+      if (sourceUnit == null) throw new ArgumentNullException(nameof(sourceUnit));
+      if (targetUnit == null) throw new ArgumentNullException(nameof(targetUnit));
+      if (query == null) throw new ArgumentNullException(nameof(query));
       query.Listen(
         @event =>
         {
-          if (baseUnit.IsActive()) baseUnit.BaseGraph.StartState(targetUnit);
+          if (sourceUnit.BaseGraph != null && sourceUnit.BaseGraph.IsUnitActive(sourceUnit)) 
+          {
+            sourceUnit.BaseGraph.StartState(targetUnit);
+          }
         }
       );
     }
 
-    public static void Connect<T>(StateUnit baseUnit, StateUnit targetUnit, EventQuery<T> query, Func<T, bool> predicate)
+    public static void Connect<T>(StateUnit sourceUnit, StateUnit targetUnit, EventQuery<T> query, Func<T, bool> predicate)
       where T : BusEvent
     {
+      if (sourceUnit == null) throw new ArgumentNullException(nameof(sourceUnit));
+      if (targetUnit == null) throw new ArgumentNullException(nameof(targetUnit));
+      if (query == null) throw new ArgumentNullException(nameof(query));
+      if (predicate == null) throw new ArgumentNullException(nameof(predicate));
       query.Listen(
         @event =>
         {
-          if (baseUnit.IsActive() && predicate(@event)) baseUnit.BaseGraph.StartState(targetUnit);
+          if (sourceUnit.BaseGraph != null && sourceUnit.BaseGraph.IsUnitActive(sourceUnit) && predicate(@event)) 
+          {
+            sourceUnit.BaseGraph.StartState(targetUnit);
+          }
+        }
+      );
+    }
+
+    // --- Transitions from Any State within a StateGraph ---
+    public static void Connect<T>(StateGraph graphContext, StateUnit targetUnit) where T : BusEvent
+    {
+      if (graphContext == null) throw new ArgumentNullException(nameof(graphContext));
+      if (targetUnit == null) throw new ArgumentNullException(nameof(targetUnit));
+      EventBus<T>.Listen(
+        @event =>
+        {
+          if (graphContext.IsGraphActive) 
+          {
+            graphContext.StartState(targetUnit);
+          }
+        }
+      );
+    }
+
+    public static void Connect<T>(StateGraph graphContext, StateUnit targetUnit, Func<T, bool> predicate)
+      where T : BusEvent
+    {
+      if (graphContext == null) throw new ArgumentNullException(nameof(graphContext));
+      if (targetUnit == null) throw new ArgumentNullException(nameof(targetUnit));
+      if (predicate == null) throw new ArgumentNullException(nameof(predicate));
+      EventBus<T>.Listen(
+        @event =>
+        {
+          if (graphContext.IsGraphActive && predicate(@event)) 
+          {
+            graphContext.StartState(targetUnit);
+          }
+        }
+      );
+    }
+
+    public static void Connect<T>(StateGraph graphContext, StateUnit targetUnit, EventQuery<T> query)
+      where T : BusEvent
+    {
+      if (graphContext == null) throw new ArgumentNullException(nameof(graphContext));
+      if (targetUnit == null) throw new ArgumentNullException(nameof(targetUnit));
+      if (query == null) throw new ArgumentNullException(nameof(query));
+      query.Listen(
+        @event =>
+        {
+          if (graphContext.IsGraphActive) 
+          {
+            graphContext.StartState(targetUnit);
+          }
+        }
+      );
+    }
+
+    public static void Connect<T>(StateGraph graphContext, StateUnit targetUnit, EventQuery<T> query, Func<T, bool> predicate)
+      where T : BusEvent
+    {
+      if (graphContext == null) throw new ArgumentNullException(nameof(graphContext));
+      if (targetUnit == null) throw new ArgumentNullException(nameof(targetUnit));
+      if (query == null) throw new ArgumentNullException(nameof(query));
+      if (predicate == null) throw new ArgumentNullException(nameof(predicate));
+      query.Listen(
+        @event =>
+        {
+          if (graphContext.IsGraphActive && predicate(@event)) 
+          {
+            graphContext.StartState(targetUnit);
+          }
         }
       );
     }

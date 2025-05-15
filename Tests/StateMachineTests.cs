@@ -2,6 +2,7 @@ using System;
 using System.Collections;
 using Nopnag.EventBusLib;
 using Nopnag.StateMachineLib.Transition;
+using Nopnag.StateMachineLib.Util; // Added for marker and configurator types
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.TestTools;
@@ -18,17 +19,20 @@ namespace Nopnag.StateMachineLib.Tests
     {
         StateMachine _stateMachine;
         StateGraph _graphA, _graphB; // For parallel graph tests
-        StateUnit _state1, _state2, _state3, _stunnedState;
+        StateUnit _state1, _state2, _state3, _stunnedState, _state4; // Added _state4 for more states
         Action _testAction;
+        Action<int> _testActionWithParam; // Added for parameterized action tests
 
         bool _state1Entered, _state1Updated, _state1Exited;
         bool _state2Entered, _state2Updated, _state2Exited;
         bool _state3Entered, _state3Updated, _state3Exited;
         bool _stunnedEntered, _stunnedUpdated, _stunnedExited;
+        bool _state4Entered, _state4Updated, _state4Exited; // Added flags for _state4
         bool _eventAListenerCalled, _eventBListenerCalled, _damageListenerCalled;
         bool _actionListenerCalled;
-        float _state1UpdateTime, _state2UpdateTime, _state3UpdateTime;
-        int _state1UpdateCount, _state2UpdateCount, _state3UpdateCount;
+        float _state1UpdateTime, _state2UpdateTime, _state3UpdateTime, _state4UpdateTime;
+        int _state1UpdateCount, _state2UpdateCount, _state3UpdateCount, _state4UpdateCount;
+        bool _anyStatePredicateCondition; // For testing AnyState.When
 
         [SetUp]
         public void Setup()
@@ -41,6 +45,7 @@ namespace Nopnag.StateMachineLib.Tests
             _state2 = _graphA.CreateUnit("State2");
             _state3 = _graphA.CreateUnit("State3");
             _stunnedState = _graphA.CreateUnit("StunnedState");
+            _state4 = _graphA.CreateUnit("State4"); // Initialize _state4
 
             // Reset flags
             _state1Entered = _state1Updated = _state1Exited = false;
@@ -69,6 +74,10 @@ namespace Nopnag.StateMachineLib.Tests
             _stunnedState.EnterStateFunction = () => { _stunnedEntered = true; Debug.Log("Stunned Enter"); };
             _stunnedState.UpdateStateFunction = (dt) => { _stunnedUpdated = true; Debug.Log($"Stunned Update: {dt}"); };
             _stunnedState.ExitStateFunction = () => { _stunnedExited = true; Debug.Log("Stunned Exit"); };
+            
+            _state4.EnterStateFunction = () => { _state4Entered = true; Debug.Log("State4 Enter"); };
+            _state4.UpdateStateFunction = (dt) => { Debug.Log($"State4 Update: {dt}"); }; // Update flags can be added if needed by tests
+            _state4.ExitStateFunction = () => { _state4Exited = true; Debug.Log("State4 Exit"); };
             
             // Clear EventBus listeners (important for test isolation)
             // Note: A proper EventBus might need a ClearAllListeners method for robust testing.
@@ -1134,7 +1143,7 @@ namespace Nopnag.StateMachineLib.Tests
         }
 
         [UnityTest]
-        public IEnumerator FluentAPI_OnEvent_WithQueryAndPredicate_WorksForMatchingParamAndPredicateTrue()
+        public IEnumerator FluentAPI_OnEvent_WithQueryAndPredicate_WorksForMatchingParamAndPredicate()
         {
             var graph = _stateMachine.CreateGraph();
             var s1 = graph.CreateState(); var s2 = graph.CreateState();
@@ -1289,5 +1298,354 @@ namespace Nopnag.StateMachineLib.Tests
             Assert.IsTrue(s1ExitedForS3, "To State3: State1.OnExit did not run for S3 transition.");
             Assert.IsTrue(s3EnteredForS3, "To State3: State3.OnEnter did not run.");
         }
+
+        #region Any State Operator Syntax Tests
+
+        [UnityTest]
+        public IEnumerator AnyState_Operator_When_TransitionsFromActiveState_AndHasPriority()
+        {
+            // Setup: 
+            // AnyState -> _state3 if _anyStatePredicateCondition is true
+            // _state1 -> _state2 if elapsedTime > 0.05f (local transition)
+            _anyStatePredicateCondition = false;
+            (StateGraph.Any > _state3).When(_ => _anyStatePredicateCondition);
+            (_state1 > _state2).When(elapsedTime => elapsedTime >= 0.05f);
+
+            _graphA.InitialUnit = _state1;
+            _stateMachine.Start(); // Enters _state1
+            yield return null;
+
+            Assert.AreEqual("State1", _graphA.GetCurrentStateName());
+            Assert.IsTrue(_state1Entered);
+            Assert.IsFalse(_state3Entered);
+
+            // Trigger AnyState condition first
+            _anyStatePredicateCondition = true;
+            _stateMachine.UpdateMachine(); // Should check AnyState first
+            yield return null; 
+
+            Assert.AreEqual("State3", _graphA.GetCurrentStateName(), "AnyState transition should have priority and moved to State3.");
+            Assert.IsTrue(_state1Exited, "State1 should have exited due to AnyState transition.");
+            Assert.IsTrue(_state3Entered, "State3 should have been entered via AnyState transition.");
+            Assert.IsFalse(_state2Entered, "State2 should not have been entered as AnyState had priority.");
+
+            // Reset for next part of the test: Local transition without AnyState firing
+            _stateMachine.Exit();
+            yield return null;
+            Setup(); // Reset all flags and states
+            
+            _anyStatePredicateCondition = false; // Ensure AnyState won't fire
+            (StateGraph.Any > _state3).When(_ => _anyStatePredicateCondition);
+            (_state1 > _state2).When(elapsedTime => elapsedTime >= 0.1f);
+            
+            _graphA.InitialUnit = _state1;
+            _stateMachine.Start();
+            yield return null;
+            Assert.AreEqual("State1", _graphA.GetCurrentStateName());
+
+            yield return new WaitForSeconds(0.15f); // Allow time for local transition
+            _stateMachine.UpdateMachine();
+            yield return null;
+
+            Assert.AreEqual("State2", _graphA.GetCurrentStateName(), "Local transition from State1 to State2 should have occurred.");
+            Assert.IsTrue(_state1Exited);
+            Assert.IsTrue(_state2Entered);
+            Assert.IsFalse(_state3Entered, "State3 should not have been entered as AnyState condition was false.");
+        }
+
+        [UnityTest]
+        public IEnumerator AnyState_Operator_OnEvent_TransitionsFromActiveState()
+        {
+            // AnyState -> _state2 on TestEventA
+            (StateGraph.Any > _state2).On<TestEventA>();
+
+            _graphA.InitialUnit = _state1;
+            _stateMachine.Start(); // Enters _state1
+            yield return null;
+
+            Assert.AreEqual("State1", _graphA.GetCurrentStateName());
+            Assert.IsFalse(_state2Entered);
+
+            EventBus<TestEventA>.Raise(new TestEventA());
+            _stateMachine.UpdateMachine(); // Process event-based AnyState transition
+            yield return null;
+
+            Assert.AreEqual("State2", _graphA.GetCurrentStateName(), "Did not transition to State2 on TestEventA via AnyState.");
+            Assert.IsTrue(_state1Exited, "State1 should have exited.");
+            Assert.IsTrue(_state2Entered, "State2 should have entered.");
+
+            // Test from another state (_state2 -> _state1 -> _state3 on TestEventA from AnyState)
+            _stateMachine.Exit();
+            yield return null;
+            Setup(); // Reset all flags and states
+
+            (StateGraph.Any > _state3).On<TestEventA>();
+            // Setup a way to get to a different state first, e.g., _state2
+            (_state1 > _state2).Immediately();
+
+            _graphA.InitialUnit = _state1;
+            _stateMachine.Start(); // _state1 -> _state2 immediately
+            yield return null; 
+            _stateMachine.UpdateMachine(); // Ensure Now() transition completes if it needs an update cycle
+            yield return null;
+            Assert.AreEqual("State2", _graphA.GetCurrentStateName(), "Should be in State2 initially for this part.");
+            Assert.IsFalse(_state3Entered);
+
+            EventBus<TestEventA>.Raise(new TestEventA());
+            _stateMachine.UpdateMachine();
+            yield return null;
+
+            Assert.AreEqual("State3", _graphA.GetCurrentStateName(), "Did not transition to State3 from State2 on TestEventA via AnyState.");
+            Assert.IsTrue(_state2Exited, "State2 should have exited.");
+            Assert.IsTrue(_state3Entered, "State3 should have entered.");
+        }
+
+        [UnityTest]
+        public IEnumerator AnyState_Operator_OnEvent_WithPredicate_TransitionsIfPredicateTrue()
+        {
+            bool allowAnyStateTransition = false;
+            (StateGraph.Any > _stunnedState).On<TestDamageEvent>(evt => allowAnyStateTransition);
+
+            _graphA.InitialUnit = _state1;
+            _stateMachine.Start(); // Enters _state1
+            yield return null;
+
+            // 1. Predicate is false, event fires, should NOT transition
+            allowAnyStateTransition = false;
+            EventBus<TestDamageEvent>.Raise(new TestDamageEvent());
+            _stateMachine.UpdateMachine();
+            yield return null;
+            Assert.AreEqual("State1", _graphA.GetCurrentStateName(), "Should not transition if predicate is false.");
+            Assert.IsFalse(_stunnedEntered);
+
+            // 2. Predicate is true, event fires, should transition
+            allowAnyStateTransition = true;
+            EventBus<TestDamageEvent>.Raise(new TestDamageEvent());
+            _stateMachine.UpdateMachine();
+            yield return null;
+            Assert.AreEqual("StunnedState", _graphA.GetCurrentStateName(), "Should transition to StunnedState if predicate is true.");
+            Assert.IsTrue(_state1Exited);
+            Assert.IsTrue(_stunnedEntered);
+        }
+
+        [UnityTest]
+        public IEnumerator AnyState_Operator_OnAction_Parameterless_TransitionsFromActiveState()
+        {
+            Action anyStateSignal = null;
+            (StateGraph.Any > _state2).On(ref anyStateSignal);
+
+            _graphA.InitialUnit = _state1;
+            _stateMachine.Start(); // Enters _state1
+            yield return null;
+            Assert.AreEqual("State1", _graphA.GetCurrentStateName());
+            Assert.IsFalse(_state2Entered);
+
+            anyStateSignal?.Invoke();
+            _stateMachine.UpdateMachine(); 
+            yield return null;
+
+            Assert.AreEqual("State2", _graphA.GetCurrentStateName(), "S1->S2: Did not transition via AnyState on parameterless Action.");
+            Assert.IsTrue(_state1Exited);
+            Assert.IsTrue(_state2Entered);
+
+            // Reset for transition from another state (_state2 already exited, _state3 will be the source)
+            _stateMachine.Exit();
+            yield return null;
+            Setup(); // Full reset
+            
+            Action anotherAnyStateSignal = null; // Use a new action instance for the new setup
+            (StateGraph.Any > _state3).On(ref anotherAnyStateSignal); // Any -> _state3
+            (_state1 > _state2).Immediately(); // Go to _state2 first: _state1 -> _state2
+
+            _graphA.InitialUnit = _state1;
+            _stateMachine.Start(); // _state1 active
+            _stateMachine.UpdateMachine(); // Process _state1 -> _state2
+            yield return null;
+            Assert.AreEqual("State2", _graphA.GetCurrentStateName(), "Setup S2->S3: Should be in State2.");
+            _state1Exited = _state2Exited = _state3Entered = false; // Reset flags
+
+            anotherAnyStateSignal?.Invoke();
+            _stateMachine.UpdateMachine();
+            yield return null;
+
+            Assert.AreEqual("State3", _graphA.GetCurrentStateName(), "S2->S3: Did not transition via AnyState on parameterless Action from State2.");
+            Assert.IsTrue(_state2Exited);
+            Assert.IsTrue(_state3Entered);
+        }
+
+        [UnityTest]
+        public IEnumerator AnyState_Operator_OnAction_WithParameter_TransitionsFromActiveState()
+        {
+            Action<int> anyStateSignalWithParam = null;
+            (StateGraph.Any > _state2).On(ref anyStateSignalWithParam);
+
+            _graphA.InitialUnit = _state1;
+            _stateMachine.Start();
+            yield return null;
+            Assert.AreEqual("State1", _graphA.GetCurrentStateName());
+            Assert.IsFalse(_state2Entered);
+
+            anyStateSignalWithParam?.Invoke(123);
+            _stateMachine.UpdateMachine();
+            yield return null;
+
+            Assert.AreEqual("State2", _graphA.GetCurrentStateName(), "S1->S2: Did not transition via AnyState on Action<int>.");
+            Assert.IsTrue(_state1Exited);
+            Assert.IsTrue(_state2Entered);
+            
+            // Reset for transition from another state
+            _stateMachine.Exit();
+            yield return null;
+            Setup();
+            
+            Action<string> anotherAnyStateSignal = null;
+            (StateGraph.Any > _state3).On(ref anotherAnyStateSignal); // Any -> _state3 with string param
+            (_state1 > _state2).Immediately(); // Go to _state2 first
+
+            _graphA.InitialUnit = _state1;
+            _stateMachine.Start();
+            _stateMachine.UpdateMachine(); 
+            yield return null;
+            // Corrected assert message from "Setup S2->S3 Query: Should be in State2."
+            Assert.AreEqual("State2", _graphA.GetCurrentStateName(), "Setup S2->S3 Action: Should be in State2."); 
+             _state1Exited = _state2Exited = _state3Entered = false;
+
+            // Corrected: Invoke the Action<string> instead of raising an event
+            anotherAnyStateSignal?.Invoke("test_payload_for_s3_transition"); 
+            _stateMachine.UpdateMachine();
+            yield return null;
+
+            Assert.AreEqual("State3", _graphA.GetCurrentStateName(), "S2->S3: Did not transition via AnyState on Action<string> from State2.");
+            Assert.IsTrue(_state2Exited);
+            Assert.IsTrue(_state3Entered);
+        }
+
+        [UnityTest]
+        public IEnumerator AnyState_Operator_OnEvent_WithQuery_TransitionsFromActiveState()
+        {
+            var targetParam = new IntParameter { Value = 101 };
+            var wrongParam = new IntParameter { Value = 102 };
+            var query = EventBus<TestEventWithParam>.Where<IntParameter>(targetParam);
+            
+            (StateGraph.Any > _state2).On(query);
+
+            _graphA.InitialUnit = _state1;
+            _stateMachine.Start();
+            yield return null;
+            Assert.AreEqual("State1", _graphA.GetCurrentStateName());
+
+            // Wrong param, should not transition
+            var evtWrong = new TestEventWithParam(); 
+            evtWrong.Set(wrongParam);
+            EventBus<TestEventWithParam>.Raise(evtWrong);
+            _stateMachine.UpdateMachine();
+            yield return null;
+            Assert.AreEqual("State1", _graphA.GetCurrentStateName(), "S1->S2 Query: Transitioned on wrong param.");
+            Assert.IsFalse(_state2Entered);
+
+            // Correct param, should transition
+            var evtCorrect = new TestEventWithParam(); 
+            evtCorrect.Set(targetParam);
+            EventBus<TestEventWithParam>.Raise(evtCorrect);
+            _stateMachine.UpdateMachine();
+            yield return null;
+            Assert.AreEqual("State2", _graphA.GetCurrentStateName(), "S1->S2 Query: Did not transition on correct param.");
+            Assert.IsTrue(_state1Exited);
+            Assert.IsTrue(_state2Entered);
+
+            // Reset for transition from another state
+            _stateMachine.Exit();
+            yield return null;
+            Setup();
+
+            var nextTargetParam = new IntParameter { Value = 201 };
+            var nextQuery = EventBus<TestEventWithParam>.Where<IntParameter>(nextTargetParam);
+            (StateGraph.Any > _state3).On(nextQuery); // Any -> _state3
+            (_state1 > _state2).Immediately(); // Go to _state2 first
+
+            _graphA.InitialUnit = _state1;
+            _stateMachine.Start();
+            _stateMachine.UpdateMachine();
+            yield return null;
+            Assert.AreEqual("State2", _graphA.GetCurrentStateName(), "Setup S2->S3 Query: Should be in State2.");
+             _state1Exited = _state2Exited = _state3Entered = false;
+
+            // Correct param for Any->S3, should transition from S2
+            var evtCorrectForS3 = new TestEventWithParam();
+            evtCorrectForS3.Set(nextTargetParam);
+            EventBus<TestEventWithParam>.Raise(evtCorrectForS3);
+            _stateMachine.UpdateMachine();
+            yield return null;
+            Assert.AreEqual("State3", _graphA.GetCurrentStateName(), "S2->S3 Query: Did not transition on correct param from State2.");
+            Assert.IsTrue(_state2Exited);
+            Assert.IsTrue(_state3Entered);
+        }
+        
+        [UnityTest]
+        public IEnumerator AnyState_Operator_OnEvent_WithQueryAndPredicate_TransitionsIfPredicateTrue()
+        {
+            var targetParam = new IntParameter { Value = 301 };
+            var query = EventBus<TestEventWithParam>.Where<IntParameter>(targetParam);
+            bool allowTransitionPredicate = false;
+
+            (StateGraph.Any > _stunnedState).On(query, evt => allowTransitionPredicate);
+
+            _graphA.InitialUnit = _state1;
+            _stateMachine.Start();
+            yield return null;
+            Assert.AreEqual("State1", _graphA.GetCurrentStateName());
+
+            // Correct param, predicate false
+            allowTransitionPredicate = false;
+            var evtCorrectParam = new TestEventWithParam(); 
+            evtCorrectParam.Set(targetParam);
+            EventBus<TestEventWithParam>.Raise(evtCorrectParam);
+            _stateMachine.UpdateMachine();
+            yield return null;
+            Assert.AreEqual("State1", _graphA.GetCurrentStateName(), "Query+Predicate: Transitioned with predicate false.");
+            Assert.IsFalse(_stunnedEntered);
+
+            // Correct param, predicate true
+            allowTransitionPredicate = true;
+            EventBus<TestEventWithParam>.Raise(evtCorrectParam); // Raise same event again
+            _stateMachine.UpdateMachine();
+            yield return null;
+            Assert.AreEqual("StunnedState", _graphA.GetCurrentStateName(), "Query+Predicate: Did not transition with predicate true.");
+            Assert.IsTrue(_state1Exited);
+            Assert.IsTrue(_stunnedEntered);
+
+            // Reset for transition from another state
+            _stateMachine.Exit();
+            yield return null;
+            Setup();
+
+            var nextTargetParam = new IntParameter { Value = 401 };
+            var nextQuery = EventBus<TestEventWithParam>.Where<IntParameter>(nextTargetParam);
+            bool nextAllowTransitionPredicate = false;
+            (StateGraph.Any > _state4).On(nextQuery, evt => nextAllowTransitionPredicate); // Any -> _state4
+            (_state1 > _state2).Immediately(); // Go to _state2 first
+
+            _graphA.InitialUnit = _state1;
+            _stateMachine.Start();
+            _stateMachine.UpdateMachine();
+            yield return null;
+            Assert.AreEqual("State2", _graphA.GetCurrentStateName(), "Setup S2->S4 Query+Predicate: Should be in State2.");
+            _state1Exited = _state2Exited = _state4Entered = false; // Reset flags for S4
+
+            // Correct param for Any->S4, predicate true
+            nextAllowTransitionPredicate = true;
+            var evtCorrectForS4 = new TestEventWithParam();
+            evtCorrectForS4.Set(nextTargetParam);
+            EventBus<TestEventWithParam>.Raise(evtCorrectForS4);
+            _stateMachine.UpdateMachine();
+            yield return null;
+            Assert.AreEqual("State4", _graphA.GetCurrentStateName(), "S2->S4 Query+Predicate: Did not transition from State2 with predicate true.");
+            Assert.IsTrue(_state2Exited);
+            Assert.IsTrue(_state4Entered);
+        }
+
+        // Removed AnyState_Operator_Now_TransitionsImmediately test method
+
+        #endregion
     }
 } 

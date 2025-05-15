@@ -1,4 +1,4 @@
-namespace Nopnag.StateMachineLib
+namespace Nopnag.StateMachineLib.Util
 {
     /// <summary>
     /// A marker struct used with the fluent API to indicate that a transition's target

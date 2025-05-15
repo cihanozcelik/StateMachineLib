@@ -2,6 +2,9 @@ namespace Nopnag.StateMachineLib.Transition
 {
   public interface IStateTransition
   {
-    bool CheckTransition(float elapsedTime, out StateUnit nextTransition);
+    StateUnit TargetUnit { get; }
+    string TargetUnitName { get; }
+    string SourceUnitName { get; }
+    bool CheckTransition(float elapsedTime, out StateUnit nextState);
   }
 }
