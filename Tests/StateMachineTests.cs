@@ -1647,5 +1647,161 @@ namespace Nopnag.StateMachineLib.Tests
         // Removed AnyState_Operator_Now_TransitionsImmediately test method
 
         #endregion
+
+        // ---- Start of StateMachineWrapper Tests ----
+        private bool _wrapperTest_StateEntered = false;
+        private bool _wrapperTest_StateUpdated = false;
+        private bool _wrapperTest_StateExited = false;
+        private int _wrapperTest_StateUpdateCount = 0;
+
+        private void ResetWrapperTestFlags()
+        {
+            _wrapperTest_StateEntered = false;
+            _wrapperTest_StateUpdated = false;
+            _wrapperTest_StateExited = false;
+            _wrapperTest_StateUpdateCount = 0;
+        }
+
+        private void SetupWrapperTestState(StateUnit state)
+        {
+            state.OnEnter = () => { _wrapperTest_StateEntered = true; Debug.Log("WrapperTestState Enter"); };
+            state.OnUpdate = (dt) => { _wrapperTest_StateUpdated = true; _wrapperTest_StateUpdateCount++; Debug.Log("WrapperTestState Update"); };
+            state.OnExit = () => { _wrapperTest_StateExited = true; Debug.Log("WrapperTestState Exit"); };
+        }
+        
+        [UnityTest]
+        public IEnumerator StateMachineWrapper_StartsAndUpdates_WhenMonoBehaviourIsEnabled()
+        {
+            ResetWrapperTestFlags();
+            var go = new GameObject("TestMB_ForWrapper_Active");
+            var mb = go.AddComponent<TestMonoBehaviourForWrapper>();
+            mb.enabled = true;
+
+            // using (var wrapper = new StateMachineWrapper(mb)) // Old way
+            var sm = mb.CreateManagedStateMachine(); // New way
+            
+            var graph = sm.CreateGraph();
+            var testState = graph.CreateState();
+            SetupWrapperTestState(testState);
+            graph.InitialUnit = testState; // Set initial state
+
+            yield return null; // Frame 1: SM should Start and Update.
+            
+            Assert.IsTrue(_wrapperTest_StateEntered, "State did not enter after first frame.");
+            Assert.AreEqual(1, _wrapperTest_StateUpdateCount, "State did not update on first frame.");
+
+            yield return null; // Frame 2: SM should update again.
+            Assert.AreEqual(2, _wrapperTest_StateUpdateCount, "State did not update on second frame.");
+            
+            UnityEngine.Object.DestroyImmediate(go); // Cleanup
+        }
+
+        [UnityTest]
+        public IEnumerator StateMachineWrapper_PausesUpdates_WhenMonoBehaviourIsDisabled()
+        {
+            ResetWrapperTestFlags();
+            var go = new GameObject("TestMB_ForWrapper_Pause");
+            var mb = go.AddComponent<TestMonoBehaviourForWrapper>();
+            mb.enabled = true;
+
+            // using (var wrapper = new StateMachineWrapper(mb)) // Old way
+            var sm = mb.CreateManagedStateMachine(); // New way
+            
+            var graph = sm.CreateGraph();
+            var testState = graph.CreateState();
+            SetupWrapperTestState(testState);
+            graph.InitialUnit = testState;
+
+            yield return null; // Frame 1: SM Starts and Updates (count = 1)
+            Assert.IsTrue(_wrapperTest_StateEntered, "State did not enter.");
+            Assert.AreEqual(1, _wrapperTest_StateUpdateCount, "State did not update initially.");
+
+            mb.enabled = false; // Disable MonoBehaviour
+            yield return null; // Frame 2: SM should NOT update
+            Assert.AreEqual(1, _wrapperTest_StateUpdateCount, "State updated while MonoBehaviour was disabled.");
+            
+            yield return null; // Frame 3: SM should STILL NOT update
+            Assert.AreEqual(1, _wrapperTest_StateUpdateCount, "State updated again while MonoBehaviour was still disabled.");
+
+            mb.enabled = true; // Re-enable
+            yield return null; // Frame 4: SM should resume updates
+            Assert.AreEqual(2, _wrapperTest_StateUpdateCount, "State did not resume updates after MonoBehaviour re-enabled.");
+            
+            UnityEngine.Object.DestroyImmediate(go);
+        }
+
+        [UnityTest]
+        public IEnumerator StateMachineWrapper_ExitsStateMachine_WhenMonoBehaviourIsDestroyed()
+        {
+            ResetWrapperTestFlags();
+            var go = new GameObject("TestMB_ForWrapper_Destroy");
+            var mb = go.AddComponent<TestMonoBehaviourForWrapper>();
+            mb.enabled = true;
+
+            // var wrapper = new StateMachineWrapper(mb); // Old way
+            var sm = mb.CreateManagedStateMachine(); // New way
+                        
+            var graph = sm.CreateGraph();
+            var testState = graph.CreateState();
+            SetupWrapperTestState(testState);
+            graph.InitialUnit = testState;
+
+            yield return null; // Frame 1: SM Starts and Updates
+            Assert.IsTrue(_wrapperTest_StateEntered, "State did not enter.");
+            _wrapperTest_StateUpdateCount = 0; // Reset update count before destruction.
+
+            UnityEngine.Object.DestroyImmediate(go); // Destroy MonoBehaviour
+            
+            yield return null; // Frame 2: Wrapper should detect destruction and call Exit on the StateMachine.
+
+            Assert.IsTrue(_wrapperTest_StateExited, "State did not exit after MonoBehaviour was destroyed.");
+            
+            yield return null; 
+            Assert.AreEqual(0, _wrapperTest_StateUpdateCount, "State should not have updated after MB destruction and Exit.");
+        }
+
+        [UnityTest]
+        public IEnumerator StateMachineWrapper_HandlesMonoBehaviourDisabledInitially_ThenEnabled()
+        {
+            ResetWrapperTestFlags();
+            var go = new GameObject("TestMB_ForWrapper_InitialDisabled");
+            var mb = go.AddComponent<TestMonoBehaviourForWrapper>();
+            mb.enabled = false; // Initially disabled
+
+            // using (var wrapper = new StateMachineWrapper(mb)) // Old way
+            var sm = mb.CreateManagedStateMachine(); // New way
+            
+            var graph = sm.CreateGraph();
+            var testState = graph.CreateState();
+            SetupWrapperTestState(testState);
+            graph.InitialUnit = testState;
+
+            yield return null; // Frame 1: MB is disabled. SM should not Start or Update.
+            Assert.IsFalse(_wrapperTest_StateEntered, "State entered while MonoBehaviour was initially disabled.");
+            Assert.AreEqual(0, _wrapperTest_StateUpdateCount, "State updated while MonoBehaviour was initially disabled.");
+
+            mb.enabled = true; // Enable MonoBehaviour
+            yield return null; // Frame 2: SM should now Start and Update.
+            
+            Assert.IsTrue(_wrapperTest_StateEntered, "State did not enter after MonoBehaviour was enabled.");
+            Assert.AreEqual(1, _wrapperTest_StateUpdateCount, "State did not update after MonoBehaviour was enabled.");
+            
+            UnityEngine.Object.DestroyImmediate(go);
+        }
+        // ---- End of StateMachineWrapper Tests ----
+
+    } // This is the original closing brace of StateMachineTests class
+
+    // Helper MonoBehaviour for wrapper tests (this was correctly placed outside)
+    public class TestMonoBehaviourForWrapper : MonoBehaviour
+    {
+        // This class can be empty or have methods if needed for more complex tests
+        // For now, its existence and enabled/disabled state are what we monitor.
+        public bool WasDestroyed { get; private set; }
+
+        void OnDestroy()
+        {
+            WasDestroyed = true;
+        }
     }
-} 
+} // End of namespace
