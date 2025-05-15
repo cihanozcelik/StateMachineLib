@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using Nopnag.EventBusLib;
 using Nopnag.StateMachineLib.Transition;
 using UnityEngine;
+using System.Linq;
 
 namespace Nopnag.StateMachineLib
 {
@@ -379,9 +380,29 @@ namespace Nopnag.StateMachineLib
     /// </summary>
     public static DynamicTargetTransitionConfigurator operator <(StateUnit fromState, DynamicTargetMarker dynamicTargetMarker)
     {
-        throw new NotSupportedException("The syntax 'StateUnit < DynamicTargetMarker' is not supported for defining dynamic transitions. Use 'StateUnit > StateGraph.DynamicTarget'.");
+        throw new NotSupportedException("The syntax 'StateUnit < DynamicTargetMarker' is not supported. Use 'StateUnit > StateGraph.DynamicTarget'.");
     }
     
-    // public void AddTransition(IStateTransition transition)
+    /// <summary>
+    /// Initiates a fluent transition definition from any state within the targetUnit's graph to the targetUnit.
+    /// This is syntactic sugar for <code>targetUnit.BaseGraph.FromAny(targetUnit)</code>.
+    /// Example: <code>(StateGraph.Any > stateB).When(...);</code>
+    /// </summary>
+    public static TransitionConfigurator operator >(AnyStateMarker anyMarker, StateUnit targetUnit)
+    {
+        if (targetUnit == null) throw new ArgumentNullException(nameof(targetUnit));
+        if (targetUnit.BaseGraph == null) 
+            throw new InvalidOperationException("Target state must be associated with a graph to create an AnyState transition using StateGraph.Any syntax.");
+        return targetUnit.BaseGraph.FromAny(targetUnit);
+    }
+
+    /// <summary>
+    /// Matching operator for <code>AnyStateMarker > StateUnit</code> to satisfy C# operator pairing rules (CS0216).
+    /// This syntax (AnyStateMarker < StateUnit) is not supported for defining transitions.
+    /// </summary>
+    public static TransitionConfigurator operator <(AnyStateMarker anyMarker, StateUnit targetUnit)
+    {
+        throw new NotSupportedException("The '<' operator is not supported for AnyState transitions. Use '(StateGraph.Any > yourStateUnit)' to define transitions.");
+    }
   }
 }

@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 using Nopnag.StateMachineLib.Transition;
+// using Nopnag.StateMachine.Runtime; // Removed incorrect using
+// No specific using needed if AnyStateMarker is in Nopnag.StateMachineLib
 
 namespace Nopnag.StateMachineLib
 {
@@ -12,6 +14,7 @@ namespace Nopnag.StateMachineLib
     /// by a predicate function.
     /// </summary>
     public static readonly DynamicTargetMarker DynamicTarget = new DynamicTargetMarker();
+    public static readonly AnyStateMarker Any = new AnyStateMarker(); // Using without explicit namespace as it's now in Nopnag.StateMachineLib
 
     private const int MAX_STATE_CHANGES_PER_UPDATE = 10; // Safety break for chained transitions
 
