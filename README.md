@@ -67,8 +67,8 @@ subGraph.InitialUnit = childState1; // Set initial state for the subgraph
 // 3. Transition by Action
 // public Action MyFluentSignal;
 (state1 > state2).On(ref MyFluentSignal);
-// public Action<int> MyFluentSignalWithParam;
-// (state1 > state2).On(ref MyFluentSignalWithParam); // With parameter
+// public Action<int> MySignalActionWithParam; // Corrected based on previous diff observation
+// (state1 > state2).On(ref MySignalActionWithParam); // With parameter 
 
 // 4. Direct Transition
 (state1 > state2).Immediately();
@@ -294,6 +294,62 @@ myState.At(2.5f, () => {
 });
 ```
 
+## Simplified MonoBehaviour Integration (Recommended)
+
+For the easiest and most robust way to use StateMachineLib with Unity's `MonoBehaviour` lifecycle, use the `CreateManagedStateMachine()` extension method. This method handles all the necessary setup for automatic updates and lifecycle management, tied directly to your `MonoBehaviour`.
+
+**How to Use:**
+Simply call `CreateManagedStateMachine()` from your `MonoBehaviour` (typically in `Awake()`) to get a fully managed `StateMachine` instance.
+
+**Key Benefits:**
+*   **Automatic Lifecycle Management:** 
+    *   The `StateMachine` starts automatically when the `MonoBehaviour` is active.
+    *   It processes `Update`, `FixedUpdate`, and `LateUpdate` calls automatically.
+    *   It pauses if the `MonoBehaviour` is disabled.
+    *   It correctly calls `Exit()` on the `StateMachine` when the `MonoBehaviour` is destroyed, ensuring proper cleanup.
+*   **Simplified Code:** Eliminates the need to manually call `Start()`, `UpdateMachine()`, or `Exit()` from your `MonoBehaviour`.
+*   **Focus on Logic:** Allows you to focus on defining your states and transitions rather than lifecycle boilerplate.
+
+**Usage Example:**
+
+```csharp
+using UnityEngine;
+using Nopnag.StateMachineLib; // Required for StateMachine and the CreateManagedStateMachine() extension method
+
+public class EnemyAI : MonoBehaviour
+{
+    // Optional: Store as a class field if other methods need to access the StateMachine.
+    // private StateMachine aiStateMachine;
+
+    void Awake()
+    {
+        // 1. Create a lifecycle-managed StateMachine instance.
+        StateMachine aiStateMachine = CreateManagedStateMachine(); // Called without 'this.'
+        
+        // If storing as a class field:
+        // this.aiStateMachine = CreateManagedStateMachine();
+
+        // 2. Configure the StateMachine as usual.
+        StateGraph brain = aiStateMachine.CreateGraph();
+        
+        StateUnit patrolState = brain.CreateState();
+        patrolState.OnEnter = () => Debug.Log("Enemy: Starting patrol.");
+        // ... add patrol logic and transitions ...
+        
+        StateUnit chaseState = brain.CreateState();
+        chaseState.OnEnter = () => Debug.Log("Enemy: Chasing player!");
+        // ... add chase logic and transitions ...
+
+        brain.InitialUnit = patrolState;
+        
+        // All lifecycle calls (Start, Update, Exit, etc.) are handled automatically.
+    }
+}
+```
+This extension method provides the most straightforward and recommended way to use `StateMachineLib` within Unity projects.
+
+(Internally, `CreateManagedStateMachine()` utilizes a helper component that links to a global event manager to achieve this. This underlying mechanism ensures the described automatic behaviors, but you typically don't need to interact with these components directly when using the extension method.)
+
 ## Fluent Transition API
 
 A fluent syntax is available for defining transitions directly from `StateUnit` instances. This API uses operator overloading (`>` and `<`) and chained method calls.
@@ -447,13 +503,13 @@ StateUnit investigatingState = myGraph.CreateState();
 
 Future methods (like for conditional transitions to a dynamically chosen single state) will be added to this fluent API.
 
+
 ## Practical Usage Example (Character Controller)
 
-This example demonstrates a character controller with Idle, Moving, Jumping, and Stunned states, using various transitions.
+This example demonstrates a character controller with Idle, Moving, Jumping, and Stunned states, using various transitions and the recommended `CreateManagedStateMachine()` for easy integration.
 
 ```csharp
 using Nopnag.StateMachineLib;
-// using Nopnag.StateMachineLib.Transition; // Not needed if only using Fluent API
 using Nopnag.EventBusLib; // For MyEvent, DamageTakenEvent etc.
 using UnityEngine;
 using System;
@@ -464,47 +520,46 @@ using System;
 
 public class CharacterController : MonoBehaviour
 {
-    private StateMachine stateMachine;
-    private StateGraph movementGraph;
-    private StateUnit idleState, movingState, jumpingState, stunnedState; 
+    // Note: stateMachine, movementGraph, and individual states (idleState, etc.) 
+    // are declared as local variables within Awake() in this example because all setup
+    // and usage occurs there. If other methods in CharacterController needed to 
+    // access them (e.g., to trigger events, query states), they would be declared 
+    // as class fields instead.
+    // Example of class field declaration if needed elsewhere:
+    // private StateMachine stateMachine;
 
     private Rigidbody rb;
     private float jumpForce = 5f;
-    private float _stunDuration = 0.5f; // How long stun lasts
-
-    // Example: Action for jump if not using EventBus for it
-    // public Action OnJumpButtonPressed; 
+    private float _stunDuration = 0.5f; 
 
     void Awake()
     {
         rb = GetComponent<Rigidbody>();
-        if (rb == null) rb = gameObject.AddComponent<Rigidbody>(); // Ensure Rigidbody
-    }
+        if (rb == null) rb = gameObject.AddComponent<Rigidbody>();
 
-    void Start()
-    {
-        stateMachine = new StateMachine();
-        movementGraph = stateMachine.CreateGraph();
+        // 1. Create a lifecycle-managed StateMachine instance.
+        StateMachine stateMachine = CreateManagedStateMachine(); // Ensure no 'this.'
 
-        // --- 1. Define States ---
-        idleState = movementGraph.CreateState();
-        movingState = movementGraph.CreateState();
-        jumpingState = movementGraph.CreateState();
-        stunnedState = movementGraph.CreateState(); 
+        // --- Initialize States and Transitions --- 
+        StateGraph movementGraph = stateMachine.CreateGraph();
 
-        // --- 2. Assign State Logic ---
+        // Define States
+        StateUnit idleState = movementGraph.CreateState();
+        StateUnit movingState = movementGraph.CreateState();
+        StateUnit jumpingState = movementGraph.CreateState();
+        StateUnit stunnedState = movementGraph.CreateState();
+
+        // Assign State Logic
         idleState.OnEnter = () => { 
             Debug.Log("Entering Idle State"); 
         };
-        idleState.OnUpdate = (timeInState) => { /* Maybe play idle animation. timeInState is DeltaTimeSinceStart */ };
+        idleState.OnUpdate = (timeInState) => { /* Maybe play idle animation. */ };
         
         movingState.OnEnter = () => Debug.Log("Entering Moving State");
         movingState.OnUpdate = (timeInState) => 
         { 
-            // Apply movement force based on input (simplified)
-            // timeInState is DeltaTimeSinceStart, you might want Time.deltaTime for physics
             Vector3 moveDir = GetMovementInput(); 
-            rb.AddForce(moveDir * 10f * Time.deltaTime); // Example using Time.deltaTime for force application
+            rb.AddForce(moveDir * 10f * Time.deltaTime);
         };
 
         jumpingState.OnEnter = () => 
@@ -514,64 +569,23 @@ public class CharacterController : MonoBehaviour
         };
         
         stunnedState.OnEnter = () => Debug.Log("Entering Stunned State");
-        stunnedState.OnUpdate = (timeInState) => { /* Maybe play stunned animation. timeInState is DeltaTimeSinceStart */ };
+        stunnedState.OnUpdate = (timeInState) => { /* Maybe play stunned animation. */ };
 
-        // --- 3. Define Transitions (using Fluent API) --- 
-
-        // --- Transitions TO Stunned (Triggered directly by DamageTakenEvent) ---
+        // Define Transitions (using Fluent API)
         (idleState > stunnedState).On<DamageTakenEvent>();
         (movingState > stunnedState).On<DamageTakenEvent>();
         (jumpingState > stunnedState).On<DamageTakenEvent>();
-
-        // --- Transition FROM Stunned ---
-        // Go back to Idle after the stun duration
         (stunnedState > idleState).After(_stunDuration);
-
-        // --- Normal Movement Transitions ---
-        // Idle -> Moving
         (idleState > movingState).When(elapsedTime => GetMovementInput().magnitude > 0.1f);
-
-        // Moving -> Idle
         (movingState > idleState).When(elapsedTime => GetMovementInput().magnitude <= 0.1f);
-
-        // Idle -> Jumping (Using Fluent API with direct input check)
         (idleState > jumpingState).When(elapsedTime => Input.GetButtonDown("Jump"));
-        // Or, if using an Action signal for jump:
-        // (idleState > jumpingState).On(ref OnJumpButtonPressed);
-        // Or, if using an EventBus event for jump:
-        // (idleState > jumpingState).On<JumpInputEvent>();
-
-
-        // Moving -> Jumping (Using Fluent API with direct input check)
         (movingState > jumpingState).When(elapsedTime => Input.GetButtonDown("Jump"));
-        // Or, if using an Action signal for jump:
-        // (movingState > jumpingState).On(ref OnJumpButtonPressed);
-        // Or, if using an EventBus event for jump:
-        // (movingState > jumpingState).On<JumpInputEvent>();
-
-        // Jumping -> Idle (e.g., after a fixed time, or when grounded)
         (jumpingState > idleState).After(1.0f); 
-        // Or, a more realistic scenario:
-        // (jumpingState > idleState).When(elapsedTime => IsGrounded() && elapsedTime > 0.2f);
 
-
-        // --- 4. Start the State Machine ---
-        movementGraph.InitialUnit = idleState; // Explicitly set if not already the first created
-        stateMachine.Start();
-
-    }
-
-    void Update()
-    {
-        // Example of invoking an Action signal for jump
-        // if (Input.GetButtonDown("Jump")) OnJumpButtonPressed?.Invoke();
+        // Set Initial State
+        movementGraph.InitialUnit = idleState;
         
-        stateMachine.UpdateMachine();
-    }
-
-    void OnDestroy()
-    {
-        stateMachine?.Exit(); // Clean up graph states
+        // Lifecycle (Start, Update, Exit) is handled automatically by CreateManagedStateMachine().
     }
 
     Vector3 GetMovementInput()
@@ -580,14 +594,8 @@ public class CharacterController : MonoBehaviour
         float vertical = Input.GetAxis("Vertical");
         return new Vector3(horizontal, 0, vertical).normalized;
     }
-
-    // Example helper for a more realistic jump transition
-    // bool IsGrounded() 
-    // {
-    //     // Check if character is grounded, e.g., using a Raycast
-    //     return Physics.Raycast(transform.position, Vector3.down, 0.1f); 
-    // }
 }
+```
 
 ## Installation
 
@@ -611,4 +619,4 @@ Alternatively, you can add both directly to your `Packages/manifest.json` file:
     // ... other dependencies
   }
 }
-``` 
+```
