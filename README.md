@@ -88,15 +88,11 @@ subGraph.InitialUnit = childState1; // Set initial state for the subgraph
 // They are evaluated with higher priority than regular state-to-state transitions.
 // Assumes: StateUnit state3; MyGameEvent etc. defined as in previous examples.
 
-// Using StateGraph.FromAny(targetState) method (original way):
-// mainGraph.FromAny(state3).When(elapsedTime => समGlobalCondition());
-// mainGraph.FromAny(state3).On<MyGameEvent>(evt => evt.Value > 10);
-
-// Using (StateGraph.Any > targetState) operator syntax (synonym for FromAny):
+// Define "Any State" transitions using the (StateGraph.Any > targetState) operator syntax:
 (StateGraph.Any > state3).When(elapsedTime => SomeGlobalCondition());
 (StateGraph.Any > state3).On<MyGameEvent>(evt => evt.Value > 10);
-// This syntax supports .When(), .After(), .On<Event>(), .On(ref Action), .Immediately() etc.
-// just like regular state-to-state transitions and the mainGraph.FromAny() method.
+// This syntax supports .When(), .After(), .On<Event>(), .On(ref Action), .Immediately() etc.,
+// just like regular state-to-state transitions.
 ```
 
 ## Key Features
