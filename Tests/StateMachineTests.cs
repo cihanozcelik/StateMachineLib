@@ -960,5 +960,334 @@ namespace Nopnag.StateMachineLib.Tests
             yield return null;
             Assert.IsFalse(s1_SignalListenerCalled, "s1_SignalListenerCalled should be false after signal invoked while s1 NOT active.");
         }
+
+        // --- Tests for Fluent Transition API ---
+
+        [UnityTest]
+        public IEnumerator FluentAPI_When_WorksAfterTime_UsingOperatorGreaterThan()
+        {
+            var graph = _stateMachine.CreateGraph(); // Use a fresh graph
+            var s1 = graph.CreateState();
+            var s2 = graph.CreateState();
+            bool s1Exited = false, s2Entered = false;
+
+            s1.OnExit = () => s1Exited = true;
+            s2.OnEnter = () => s2Entered = true;
+
+            float transitionTime = 0.1f;
+            // New Fluent API for BasicTransition
+            (s1 > s2).When(elapsedTime => elapsedTime >= transitionTime);
+
+            graph.InitialUnit = s1;
+            graph.EnterGraph(); // Isolate graph for this test
+            Assert.IsTrue(graph.IsUnitActive(s1));
+            yield return null; // Let initial Enter run
+
+            // Wait slightly longer than the required transition time
+            yield return new WaitForSeconds(transitionTime + 0.02f); 
+
+            graph.UpdateGraph(); 
+            yield return null; // Allow Enter/Exit logic of the new state to run
+
+            Assert.IsTrue(graph.IsUnitActive(s2), "Did not transition to s2 using fluent API after waiting.");
+            Assert.IsTrue(s1Exited, "s1 did not exit after fluent API transition.");
+            Assert.IsTrue(s2Entered, "s2 did not enter after fluent API transition.");
+        }
+
+        [UnityTest]
+        public IEnumerator FluentAPI_When_WorksAfterTime_UsingOperatorLessThan()
+        {
+            var graph = _stateMachine.CreateGraph(); 
+            var s1_source = graph.CreateState(); // Source
+            var s2_target = graph.CreateState(); // Target
+            bool s1Exited = false, s2Entered = false;
+
+            s1_source.OnExit = () => s1Exited = true;
+            s2_target.OnEnter = () => s2Entered = true;
+
+            float transitionTime = 0.1f;
+            // New Fluent API using < operator: (target < source)
+            (s2_target < s1_source).When(elapsedTime => elapsedTime >= transitionTime);
+
+            graph.InitialUnit = s1_source;
+            graph.EnterGraph(); 
+            Assert.IsTrue(graph.IsUnitActive(s1_source));
+            yield return null; 
+
+            yield return new WaitForSeconds(transitionTime + 0.02f); 
+
+            graph.UpdateGraph(); 
+            yield return null; 
+
+            Assert.IsTrue(graph.IsUnitActive(s2_target), "Did not transition to s2_target using fluent API with < operator after waiting.");
+            Assert.IsTrue(s1Exited, "s1_source did not exit after fluent API transition with < operator.");
+            Assert.IsTrue(s2Entered, "s2_target did not enter after fluent API transition with < operator.");
+        }
+
+        [UnityTest]
+        public IEnumerator FluentAPI_After_WorksAfterDuration()
+        {
+            var graph = _stateMachine.CreateGraph(); 
+            var s1 = graph.CreateState();
+            var s2 = graph.CreateState();
+            bool s1Exited = false, s2Entered = false;
+
+            s1.OnExit = () => s1Exited = true;
+            s2.OnEnter = () => s2Entered = true;
+
+            float transitionDuration = 0.1f;
+            (s1 > s2).After(transitionDuration);
+
+            graph.InitialUnit = s1;
+            graph.EnterGraph(); 
+            Assert.IsTrue(graph.IsUnitActive(s1));
+            yield return null; 
+
+            // Check it doesn't transition before time
+            yield return new WaitForSeconds(transitionDuration * 0.5f); 
+            graph.UpdateGraph();
+            yield return null;
+            Assert.IsTrue(graph.IsUnitActive(s1), "Transitioned with .After() too early.");
+            Assert.IsFalse(s2Entered, "s2 entered too early.");
+
+            // Wait for the full duration + a bit
+            yield return new WaitForSeconds((transitionDuration * 0.5f) + 0.02f); 
+            graph.UpdateGraph(); 
+            yield return null; 
+
+            Assert.IsTrue(graph.IsUnitActive(s2), "Did not transition to s2 using fluent .After() API after waiting.");
+            Assert.IsTrue(s1Exited, "s1 did not exit after fluent .After() API transition.");
+            Assert.IsTrue(s2Entered, "s2 did not enter after fluent .After() API transition.");
+        }
+
+        [UnityTest]
+        public IEnumerator FluentAPI_OnEvent_Generic_WorksOnRaise()
+        {
+            var graph = _stateMachine.CreateGraph();
+            var s1 = graph.CreateState();
+            var s2 = graph.CreateState();
+            s1.OnExit = () => _state1Exited = true; // Use existing flags for simplicity if setup defines them
+            s2.OnEnter = () => _state2Entered = true;
+            _state1Exited = false; _state2Entered = false; // Reset
+
+            (s1 > s2).On<TestEventA>();
+
+            graph.InitialUnit = s1; graph.EnterGraph(); yield return null;
+            Assert.IsTrue(graph.IsUnitActive(s1));
+
+            EventBus<TestEventA>.Raise(new TestEventA());
+            yield return null; 
+
+            Assert.IsTrue(graph.IsUnitActive(s2), "Did not transition on Event (generic) using fluent API.");
+            Assert.IsTrue(_state1Exited);
+            Assert.IsTrue(_state2Entered);
+        }
+
+        [UnityTest]
+        public IEnumerator FluentAPI_OnEvent_WithPredicate_WorksIfPredicateTrue()
+        {
+            var graph = _stateMachine.CreateGraph();
+            var s1 = graph.CreateState(); var s2 = graph.CreateState();
+            s1.OnExit = () => _state1Exited = true; s2.OnEnter = () => _state2Entered = true;
+            _state1Exited = false; _state2Entered = false;
+            bool allowTransition = false;
+
+            (s1 > s2).On<TestEventB>(evt => allowTransition);
+            
+            graph.InitialUnit = s1; graph.EnterGraph(); yield return null;
+
+            allowTransition = false;
+            EventBus<TestEventB>.Raise(new TestEventB()); yield return null;
+            Assert.IsTrue(graph.IsUnitActive(s1), "Transitioned with predicate false.");
+
+            allowTransition = true;
+            EventBus<TestEventB>.Raise(new TestEventB()); yield return null;
+            Assert.IsTrue(graph.IsUnitActive(s2), "Did not transition with predicate true.");
+            Assert.IsTrue(_state1Exited);
+            Assert.IsTrue(_state2Entered);
+        }
+
+        [UnityTest]
+        public IEnumerator FluentAPI_OnEvent_WithQuery_WorksForMatchingParam()
+        {
+            var graph = _stateMachine.CreateGraph();
+            var s1 = graph.CreateState(); var s2 = graph.CreateState();
+            s1.OnExit = () => _state1Exited = true; s2.OnEnter = () => _state2Entered = true;
+            _state1Exited = false; _state2Entered = false;
+            var targetParam = new IntParameter { Value = 10 };
+            var wrongParam = new IntParameter { Value = 11 };
+            var query = EventBus<TestEventWithParam>.Where<IntParameter>(targetParam);
+
+            (s1 > s2).On(query);
+
+            graph.InitialUnit = s1; graph.EnterGraph(); yield return null;
+
+            var evtWrong = new TestEventWithParam(); evtWrong.Set(wrongParam);
+            EventBus<TestEventWithParam>.Raise(evtWrong); yield return null;
+            Assert.IsTrue(graph.IsUnitActive(s1), "Transitioned on wrong param with query.");
+
+            var evtCorrect = new TestEventWithParam(); evtCorrect.Set(targetParam);
+            EventBus<TestEventWithParam>.Raise(evtCorrect); yield return null;
+            Assert.IsTrue(graph.IsUnitActive(s2), "Did not transition on correct param with query.");
+            Assert.IsTrue(_state1Exited);
+            Assert.IsTrue(_state2Entered);
+        }
+
+        [UnityTest]
+        public IEnumerator FluentAPI_OnEvent_WithQueryAndPredicate_WorksForMatchingParamAndPredicateTrue()
+        {
+            var graph = _stateMachine.CreateGraph();
+            var s1 = graph.CreateState(); var s2 = graph.CreateState();
+            s1.OnExit = () => _state1Exited = true; s2.OnEnter = () => _state2Entered = true;
+            _state1Exited = false; _state2Entered = false;
+            var targetParam = new IntParameter { Value = 20 };
+            var query = EventBus<TestEventWithParam>.Where<IntParameter>(targetParam);
+            bool allowTransitionPredicate = false;
+
+            (s1 > s2).On(query, evt => allowTransitionPredicate);
+
+            graph.InitialUnit = s1; graph.EnterGraph(); yield return null;
+
+            // Correct param, predicate false
+            allowTransitionPredicate = false;
+            var evt1 = new TestEventWithParam(); evt1.Set(targetParam);
+            EventBus<TestEventWithParam>.Raise(evt1); yield return null;
+            Assert.IsTrue(graph.IsUnitActive(s1), "Transitioned with predicate false (query+predicate).");
+
+            // Correct param, predicate true
+            allowTransitionPredicate = true;
+            var evt2 = new TestEventWithParam(); evt2.Set(targetParam);
+            EventBus<TestEventWithParam>.Raise(evt2); yield return null;
+            Assert.IsTrue(graph.IsUnitActive(s2), "Did not transition with predicate true (query+predicate).");
+            Assert.IsTrue(_state1Exited);
+            Assert.IsTrue(_state2Entered);
+        }
+        
+        private Action _fluentTestActionSignal; // Used for ref parameter
+        private Action<int> _fluentTestActionSignalWithParam; // Used for ref parameter
+
+        [UnityTest]
+        public IEnumerator FluentAPI_OnAction_Parameterless_WorksOnInvoke()
+        {
+            var graph = _stateMachine.CreateGraph();
+            var s1 = graph.CreateState(); var s2 = graph.CreateState();
+            s1.OnExit = () => _state1Exited = true; s2.OnEnter = () => _state2Entered = true;
+            _state1Exited = false; _state2Entered = false;
+            _fluentTestActionSignal = null; // Ensure fresh for ref
+
+            (s1 > s2).On(ref _fluentTestActionSignal);
+
+            graph.InitialUnit = s1; graph.EnterGraph(); yield return null;
+            Assert.IsTrue(graph.IsUnitActive(s1));
+
+            _fluentTestActionSignal?.Invoke();
+            yield return null; 
+            Assert.IsTrue(graph.IsUnitActive(s2), "Did not transition on Action invoke using fluent API.");
+            Assert.IsTrue(_state1Exited);
+            Assert.IsTrue(_state2Entered);
+        }
+
+        [UnityTest]
+        public IEnumerator FluentAPI_OnAction_WithParameter_WorksOnInvoke()
+        {
+            var graph = _stateMachine.CreateGraph();
+            var s1 = graph.CreateState(); var s2 = graph.CreateState();
+            s1.OnExit = () => _state1Exited = true; s2.OnEnter = () => _state2Entered = true;
+            _state1Exited = false; _state2Entered = false;
+            _fluentTestActionSignalWithParam = null; // Ensure fresh for ref
+
+            (s1 > s2).On(ref _fluentTestActionSignalWithParam);
+
+            graph.InitialUnit = s1; graph.EnterGraph(); yield return null;
+            Assert.IsTrue(graph.IsUnitActive(s1));
+
+            _fluentTestActionSignalWithParam?.Invoke(123);
+            yield return null; 
+            Assert.IsTrue(graph.IsUnitActive(s2), "Did not transition on Action<int> invoke using fluent API.");
+            Assert.IsTrue(_state1Exited);
+            Assert.IsTrue(_state2Entered);
+        }
+
+        [UnityTest]
+        public IEnumerator FluentAPI_Immediately_Works()
+        {
+            var graph = _stateMachine.CreateGraph();
+            var s1 = graph.CreateState();
+            var s2 = graph.CreateState();
+            bool s1Exited = false, s2Entered = false;
+
+            s1.OnExit = () => s1Exited = true;
+            s2.OnEnter = () => s2Entered = true;
+
+            // New Fluent API for DirectTransition
+            (s1 > s2).Immediately();
+
+            graph.InitialUnit = s1;
+            graph.EnterGraph(); // Start should trigger Enter and immediate transition check
+            yield return null; // Wait a frame for the transition to occur
+
+            Assert.IsTrue(graph.IsUnitActive(s2), "Did not transition to s2 using fluent .Immediately() API.");
+            Assert.IsTrue(s1Exited, "s1 did not exit after fluent .Immediately() API transition.");
+            Assert.IsTrue(s2Entered, "s2 did not enter after fluent .Immediately() API transition.");
+        }
+
+        [UnityTest]
+        public IEnumerator FluentAPI_ConditionalTransition_DynamicTarget_SelectsCorrectState()
+        {
+            StateUnit targetStateFromPredicate = null;
+
+            // Fluent API equivalent of ConditionalTransition.Connect(_state1, predicate)
+            (_state1 > StateGraph.DynamicTarget).When(elapsedTime => targetStateFromPredicate);
+
+            _stateMachine.Start(); // _state1 is the initial state from Setup
+            yield return null;
+            Assert.IsTrue(_graphA.IsUnitActive(_state1), "Initial: Should be in State1.");
+            Assert.IsTrue(_state1Entered, "Initial: State1.OnEnter should have run.");
+            Assert.IsFalse(_state1Exited, "Initial: State1.OnExit should not have run.");
+
+            // --- Test transition to _state2 ---
+            bool s1ExitedForS2 = false, s2EnteredForS2 = false;
+            _state1.OnExit = () => s1ExitedForS2 = true;
+            _state2.OnEnter = () => s2EnteredForS2 = true;
+            // Reset other flags that might have been set by Setup or previous parts if this test were more complex
+            _state1Entered = false; // Reset since Setup already ran it.
+            _state2Exited = false; 
+
+            targetStateFromPredicate = _state2;
+            _stateMachine.UpdateMachine();
+            yield return null;
+            Assert.IsTrue(_graphA.IsUnitActive(_state2), "To State2: Did not transition to State2.");
+            Assert.IsTrue(s1ExitedForS2, "To State2: State1.OnExit did not run.");
+            Assert.IsTrue(s2EnteredForS2, "To State2: State2.OnEnter did not run.");
+
+            // --- Reset and transition to _state3 ---
+            _stateMachine.Exit(); // Exits current state (_state2)
+            yield return null;
+
+            // Reset flags for next phase
+            _graphA.InitialUnit = _state1; // Explicitly reset initial state for the graph
+            s1ExitedForS2 = false; 
+            s2EnteredForS2 = false;
+            bool s1ExitedForS3 = false, s3EnteredForS3 = false;
+            _state1.OnEnter = () => { _state1Entered = true; }; // Re-assign OnEnter to track re-entry
+            _state1.OnExit = () => s1ExitedForS3 = true;
+            _state2.OnEnter = null; // Clear previous test-specific assignment
+            _state3.OnEnter = () => s3EnteredForS3 = true;
+            _state1Entered = false; // For the upcoming Start()
+
+            targetStateFromPredicate = null; // Ensure no immediate transition on Start()
+            _stateMachine.Start(); // Re-enters _state1
+            yield return null;
+            Assert.IsTrue(_graphA.IsUnitActive(_state1), "To State3 Reset: Should be in State1 after reset.");
+            Assert.IsTrue(_state1Entered, "To State3 Reset: State1.OnEnter should have run on restart.");
+            Assert.IsFalse(s1ExitedForS3, "To State3 Reset: State1.OnExit should not have run yet.");
+
+            targetStateFromPredicate = _state3;
+            _stateMachine.UpdateMachine();
+            yield return null;
+            Assert.IsTrue(_graphA.IsUnitActive(_state3), "To State3: Did not transition to State3.");
+            Assert.IsTrue(s1ExitedForS3, "To State3: State1.OnExit did not run for S3 transition.");
+            Assert.IsTrue(s3EnteredForS3, "To State3: State3.OnEnter did not run.");
+        }
     }
 } 

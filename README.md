@@ -209,7 +209,7 @@ myState.At(2.5f, () => {
 
 Transitions define how the state machine moves from one `StateUnit` to another. `TransitionByAction` and `TransitionByEvent` directly trigger state changes, while the others are evaluated during the source state's `Update` loop.
 
-*   **`BasicTransition`**: 
+*   **`BasicTransition`**:
     *   **How:** Connects two states based on a predicate evaluating to true/false.
     *   **Trigger:** `predicate(elapsedTimeInState)` returns `true`.
     *   **Usage:** 
@@ -281,6 +281,159 @@ Transitions define how the state machine moves from one `StateUnit` to another. 
         TransitionByEvent.Connect<EnemySpottedEvent>(patrollingState, alertState, 
             evt => evt.EnemyType == Enemy.EliteGuard);
         ```
+
+## Fluent Transition API (Alternative Syntax)
+
+As an alternative to the static `Connect` methods on transition types, a more fluent syntax is available for defining transitions directly from `StateUnit` instances. This API uses operator overloading (`>` and `<`) and chained method calls.
+
+This fluent approach is designed with structs to minimize garbage generation during transition setup.
+
+**Initiating a Transition:**
+
+You can start defining a transition using the `>` operator between a source and a target state, or the `<` operator between a target and a source state. Both achieve the same result of setting up a transition from the source to the target.
+
+```csharp
+// These are equivalent ways to start defining a transition from stateA to stateB:
+var transitionAB = (stateA > stateB); 
+var transitionAlsoAB = (stateB < stateA); // (target < source) also configures source -> target
+```
+
+This returns a configurator struct. You then chain one of the following methods to define the transition logic:
+
+### `(fromState > toState).When(predicate)`:
+
+This defines a `BasicTransition` that triggers when the provided predicate returns `true`. The predicate receives the elapsed time in the source state.
+
+```csharp
+StateUnit stateA = myGraph.CreateState();
+StateUnit stateB = myGraph.CreateState();
+
+// Transition from stateA to stateB when health is low after 1 second
+(stateA > stateB).When(elapsedTime => player.Health < 10 && elapsedTime > 1.0f);
+
+// Equivalent using the < operator
+(stateB < stateA).When(elapsedTime => player.Health < 10 && elapsedTime > 1.0f);
+```
+
+### `(fromState > toState).After(duration)`:
+
+This defines a `BasicTransition` that triggers after a specific `duration` (in seconds) has passed since the source state was entered.
+
+```csharp
+StateUnit loadingState = myGraph.CreateState();
+StateUnit readyState = myGraph.CreateState();
+
+// Transition from loadingState to readyState after 2.5 seconds
+(loadingState > readyState).After(2.5f);
+```
+
+### `(fromState > toState).On<TEvent>(...) (for EventBus Events)`:
+
+This defines a `TransitionByEvent`. It has several overloads:
+
+*   **`On<TEvent>()`**: Triggers when any event of `TEvent` is raised.
+    ```csharp
+    (stateA > stateB).On<PlayerDiedEvent>();
+    ```
+*   **`On<TEvent>(Func<TEvent, bool> predicate)`**: Triggers if `TEvent` is raised AND the predicate returns `true`.
+    ```csharp
+    (stateA > stateB).On<EnemySpottedEvent>(evt => evt.IsHighPriority);
+    ```
+*   **`On<TEvent>(EventQuery<TEvent> query, Func<TEvent, bool> predicate = null)`**: Triggers if `TEvent` matching the `query` is raised. If a `predicate` is also provided, it must also return `true`.
+    ```csharp
+    // Define a marker IParameter type for your specific query.
+    public class ItemTag : IParameter { }
+
+    // Event publishing (example of how the event would be set up elsewhere):
+    // var collectedEvent = new ItemCollectedEvent();
+    // collectedEvent.Set<ItemTag>("KeyCard"); // Set the string value with ItemTag as type key
+    // EventBus.Raise(collectedEvent);
+
+    // Fluent transition setup:
+    (stateA > stateB).On(
+        EventBus<ItemCollectedEvent>.Where<ItemTag>("KeyCard"), // Filter by the string value "KeyCard"
+        evt => evt.Collector.IsPlayer // Optional additional predicate on the event object
+    );
+    ```
+
+### `(fromState > toState).On(ref signal) (for C# Actions)`:
+
+This defines a `TransitionByAction` that triggers when the provided C# `Action` or `Action<T>` delegate (signal) is invoked. The signal must be passed with the `ref` keyword. (The heading shows the parameterless version; `Action<TActionParam>` is also supported).
+
+```csharp
+public Action PlayerJumped;
+public Action<int> PlayerScoredPoints;
+
+// ... in setup ...
+(groundedState > jumpingState).On(ref PlayerJumped);
+(anyState > scoreCelebrationState).On(ref PlayerScoredPoints);
+
+// ... elsewhere ...
+PlayerJumped?.Invoke();
+PlayerScoredPoints?.Invoke(100);
+```
+
+### `(fromState > toState).Immediately()`:
+
+This defines a `DirectTransition` that occurs unconditionally as soon as the source state is entered or updated, causing an immediate transition to the target state. It's useful for states that are purely transitional or serve as entry points that should immediately redirect.
+
+```csharp
+StateUnit entryPointState = myGraph.CreateState();
+StateUnit actualStartState = myGraph.CreateState();
+
+// From entryPointState, immediately go to actualStartState
+(entryPointState > actualStartState).Immediately();
+```
+
+### `(fromState > targetStates).When(indexPredicate)`:
+
+You can define transitions from a single state to one of several possible target states based on an index returned by a condition function. This is useful for decision points where the next state depends on dynamic criteria.
+
+The `When` method, when used with an array of target `StateUnit`s, expects its predicate to return an integer.
+- If the integer is a valid index into the array of target states (0 to N-1), a transition to the state at that index occurs.
+- If the integer is -1 (or any out-of-bounds negative number), no transition occurs.
+
+```csharp
+StateUnit decisionState = myGraph.CreateState();
+StateUnit optionAState = myGraph.CreateState();
+StateUnit optionBState = myGraph.CreateState();
+StateUnit optionCState = myGraph.CreateState();
+
+// From decisionState, transition to one of the new[] { optionAState, ... } based on index
+(decisionState > new[] { optionAState, optionBState, optionCState }).When(elapsedTime => {
+    // Assuming 'player' and 'PlayerChoices' are defined elsewhere
+    // and 'elapsedTime' is the time since 'decisionState' became active.
+    if (player.Choice == PlayerChoices.A) return 0;       // Transition to optionAState
+    if (player.Choice == PlayerChoices.B) return 1;       // Transition to optionBState
+    if (elapsedTime > 10.0f && player.IsIdle) return 2; // Transition to optionCState
+    return -1;                                          // No transition
+});
+```
+
+### `(fromState > StateGraph.DynamicTarget).When(dynamicTargetPredicate)`:
+
+This defines a `ConditionalTransition` where the target state is determined at runtime by the `dynamicTargetPredicate`. This is the fluent equivalent of the static `ConditionalTransition.Connect(fromState, dynamicTargetPredicate)` method.
+
+You initiate this by transitioning from a state to the special `StateGraph.DynamicTarget` marker. The subsequent `.When()` method then takes a predicate of type `Func<float, StateUnit>`.
+
+-   **`dynamicTargetPredicate`**: A function that receives the elapsed time in the source state and should return:
+    -   A non-null `StateUnit` to transition to that state.
+    -   `null` to indicate that no transition should occur at this time.
+
+```csharp
+StateUnit patrollingState = myGraph.CreateState();
+StateUnit chasingState = myGraph.CreateState();
+StateUnit investigatingState = myGraph.CreateState();
+
+// From patrollingState, transition to a dynamically chosen state
+(patrollingState > StateGraph.DynamicTarget).When(elapsedTime => {
+    if (CanSeePlayer()) return chasingState;
+    if (HeardNoise()) return investigatingState;
+    return null; // Stay in patrolling state
+});
+```
+
+Future methods (like for conditional transitions to a dynamically chosen single state) will be added to this fluent API.
 
 ## Practical Usage Example (Character Controller)
 

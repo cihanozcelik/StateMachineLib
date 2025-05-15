@@ -5,6 +5,13 @@ namespace Nopnag.StateMachineLib
 {
   public class StateGraph
   {
+    /// <summary>
+    /// A marker used with the fluent API (e.g., <code>sourceState > StateGraph.DynamicTarget</code>)
+    /// to indicate that a transition's target state will be determined dynamically at runtime
+    /// by a predicate function.
+    /// </summary>
+    public static readonly DynamicTargetMarker DynamicTarget = new DynamicTargetMarker();
+
     public StateUnit InitialUnit;
     public bool IsGraphActive;
     StateUnit _currentUnit;

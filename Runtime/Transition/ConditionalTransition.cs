@@ -6,7 +6,7 @@ namespace Nopnag.StateMachineLib.Transition
   {
     public Func<float, StateUnit> Predicate;
 
-    ConditionalTransition()
+    private ConditionalTransition()
     {
     }
 
@@ -16,9 +16,11 @@ namespace Nopnag.StateMachineLib.Transition
       return nextTransition != null;
     }
 
-    public static void Connect(StateUnit stateUnit, Func<float, StateUnit> predicate)
+    public static ConditionalTransition Connect(StateUnit stateUnit, Func<float, StateUnit> predicate)
     {
-      stateUnit.Transitions.Add(new ConditionalTransition { Predicate = predicate });
+      var transition = new ConditionalTransition { Predicate = predicate };
+      stateUnit.Transitions.Add(transition);
+      return transition;
     }
   }
 }
