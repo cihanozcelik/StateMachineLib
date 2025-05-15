@@ -324,43 +324,64 @@ namespace Nopnag.StateMachineLib
       }
     }
 
-    // Overload for operator > to initiate fluent transition definition
-    public static SingleTargetTransitionConfigurator operator >(StateUnit fromState, StateUnit toState)
+    // --- Operator Overloads for Fluent API ---
+
+    /// <summary>
+    /// Initiates a fluent transition definition from a source state to a target state.
+    /// Example: <code>(stateA > stateB).When(...);</code>
+    /// </summary>
+    public static TransitionConfigurator operator >(StateUnit fromState, StateUnit toState)
     {
-        return new SingleTargetTransitionConfigurator(fromState, toState);
+      return new TransitionConfigurator(fromState, toState);
     }
 
-    // Matching operator < to satisfy CS0216. 
-    // (target < source) is equivalent to (source > target)
-    public static SingleTargetTransitionConfigurator operator <(StateUnit toState, StateUnit fromState)
+    /// <summary>
+    /// Initiates a fluent transition definition from a source state to a target state (reversed operands).
+    /// Satisfies CS0216 (operator < requires matching operator >).
+    /// Conceptually, <code>(targetState < fromState)</code> is equivalent to <code>(fromState > targetState)</code>.
+    /// </summary>
+    public static TransitionConfigurator operator <(StateUnit toState, StateUnit fromState)
     {
-        // We ensure that FromState is always the left operand of > or right operand of < conceptually
-        return new SingleTargetTransitionConfigurator(fromState, toState);
+      // We ensure that FromState is always the left operand of > or right operand of < conceptually
+      return new TransitionConfigurator(fromState, toState);
     }
 
-    // Operators for MultiTargetTransitionConfigurator
-    public static MultiTargetTransitionConfigurator operator >(StateUnit from, StateUnit[] to)
+    /// <summary>
+    /// Initiates a fluent transition definition from a source state to one of several target states (indexed).
+    /// Example: <code>(stateA > new[] { stateB, stateC }).When(...);</code>
+    /// </summary>
+    public static MultiTargetTransitionConfigurator operator >(StateUnit fromState, StateUnit[] toStates)
     {
-        return new MultiTargetTransitionConfigurator(from, to);
+        return new MultiTargetTransitionConfigurator(fromState, toStates);
     }
 
-    public static MultiTargetTransitionConfigurator operator <( StateUnit to, StateUnit[] from)
+    /// <summary>
+    /// Matching operator for <code>StateUnit > StateUnit[]</code> to satisfy CS0216.
+    /// This syntax (sourceState < targetStatesArray) is not supported for fluent transitions.
+    /// </summary>
+    public static MultiTargetTransitionConfigurator operator <(StateUnit fromState, StateUnit[] toStates)
     {
-      throw new NotSupportedException("The syntax 'StateUnit < StateUnit[]' is not supported");
+        throw new NotSupportedException("The syntax 'StateUnit < StateUnit[]' is not supported for defining multi-target transitions. Use 'StateUnit > StateUnit[]'.");
     }
-    
-    public static DynamicTargetTransitionConfigurator operator >(StateUnit sourceUnit, DynamicTargetMarker dynamicMarker)
+
+    /// <summary>
+    /// Initiates a fluent transition definition from a source state to a dynamically resolved target state.
+    /// Example: <code>(stateA > StateGraph.DynamicTarget).When(...);</code>
+    /// </summary>
+    public static DynamicTargetTransitionConfigurator operator >(StateUnit fromState, DynamicTargetMarker dynamicTargetMarker)
     {
-        if (sourceUnit == null) throw new ArgumentNullException(nameof(sourceUnit));
-        // The dynamicMarker parameter itself serves as the type check. 
-        // No explicit check against StateGraph.DynamicTarget is needed here due to strong typing.
-        return new DynamicTargetTransitionConfigurator(sourceUnit);
+        return new DynamicTargetTransitionConfigurator(fromState);
     }
-    public static DynamicTargetTransitionConfigurator operator <(StateUnit sourceUnit, DynamicTargetMarker dynamicMarker)
-    { 
-        // This syntax (e.g., sourceUnit < StateGraph.DynamicTarget) is not meaningful for this fluent API.
-        // StateGraph.DynamicTarget is intended to be used on the right side of the '>' operator.
+
+    /// <summary>
+    /// Matching operator for <code>StateUnit > DynamicTargetMarker</code> to satisfy CS0216.
+    /// This syntax (sourceState < dynamicTargetMarker) is not supported for fluent transitions.
+    /// </summary>
+    public static DynamicTargetTransitionConfigurator operator <(StateUnit fromState, DynamicTargetMarker dynamicTargetMarker)
+    {
         throw new NotSupportedException("The syntax 'StateUnit < DynamicTargetMarker' is not supported for defining dynamic transitions. Use 'StateUnit > StateGraph.DynamicTarget'.");
     }
+    
+    // public void AddTransition(IStateTransition transition)
   }
 }

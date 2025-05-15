@@ -18,17 +18,20 @@ namespace Nopnag.StateMachineLib.Tests
     {
         StateMachine _stateMachine;
         StateGraph _graphA, _graphB; // For parallel graph tests
-        StateUnit _state1, _state2, _state3, _stunnedState;
+        StateUnit _state1, _state2, _state3, _stunnedState, _state4; // Added _state4 for more states
         Action _testAction;
+        Action<int> _testActionWithParam; // Added for parameterized action tests
 
         bool _state1Entered, _state1Updated, _state1Exited;
         bool _state2Entered, _state2Updated, _state2Exited;
         bool _state3Entered, _state3Updated, _state3Exited;
         bool _stunnedEntered, _stunnedUpdated, _stunnedExited;
+        bool _state4Entered, _state4Updated, _state4Exited; // Added flags for _state4
         bool _eventAListenerCalled, _eventBListenerCalled, _damageListenerCalled;
         bool _actionListenerCalled;
-        float _state1UpdateTime, _state2UpdateTime, _state3UpdateTime;
-        int _state1UpdateCount, _state2UpdateCount, _state3UpdateCount;
+        float _state1UpdateTime, _state2UpdateTime, _state3UpdateTime, _state4UpdateTime;
+        int _state1UpdateCount, _state2UpdateCount, _state3UpdateCount, _state4UpdateCount;
+        bool _anyStatePredicateCondition; // For testing AnyState.When
 
         [SetUp]
         public void Setup()
@@ -41,6 +44,7 @@ namespace Nopnag.StateMachineLib.Tests
             _state2 = _graphA.CreateUnit("State2");
             _state3 = _graphA.CreateUnit("State3");
             _stunnedState = _graphA.CreateUnit("StunnedState");
+            _state4 = _graphA.CreateUnit("State4"); // Initialize _state4
 
             // Reset flags
             _state1Entered = _state1Updated = _state1Exited = false;

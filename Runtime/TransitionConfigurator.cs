@@ -5,18 +5,36 @@ using Nopnag.StateMachineLib.Transition;
 namespace Nopnag.StateMachineLib
 {
     /// <summary>
-    /// Configures a transition between two specific states.
+    /// Configures a transition.
+    /// If FromState is null, it's an "Any State" transition relative to the GraphContext.
     /// This struct is designed to be lightweight and avoid heap allocations for the fluent API.
     /// </summary>
-    public readonly struct SingleTargetTransitionConfigurator
+    public readonly struct TransitionConfigurator
     {
-        internal readonly StateUnit FromState;
+        internal readonly StateGraph GraphContext;
+        internal readonly StateUnit FromState; // Null if this is an "Any State" transition
         internal readonly StateUnit ToState;
 
-        internal SingleTargetTransitionConfigurator(StateUnit fromState, StateUnit toState)
+        internal TransitionConfigurator(StateUnit fromState, StateUnit toState)
         {
+            if (fromState == null) throw new ArgumentNullException(nameof(fromState));
+            if (toState == null) throw new ArgumentNullException(nameof(toState));
+            
             FromState = fromState;
             ToState = toState;
+            GraphContext = fromState.BaseGraph; // Changed ParentGraph to BaseGraph
+            if (GraphContext == null) throw new InvalidOperationException("FromState must be part of a StateGraph.");
+        }
+
+        // Constructor for "Any State" transitions
+        internal TransitionConfigurator(StateGraph graphContext, StateUnit toState)
+        {
+            if (graphContext == null) throw new ArgumentNullException(nameof(graphContext));
+            if (toState == null) throw new ArgumentNullException(nameof(toState));
+
+            FromState = null; // Indicates "Any State"
+            ToState = toState;
+            GraphContext = graphContext;
         }
 
         /// <summary>
@@ -26,13 +44,15 @@ namespace Nopnag.StateMachineLib
         /// <param name="predicate">The condition to check. Transition occurs if it returns true.</param>
         public void When(Func<float, bool> predicate)
         {
-            if (FromState == null || ToState == null)
+            if (ToState == null) { UnityEngine.Debug.LogError(ErrorMessageTargetNull); return; }
+            if (FromState != null) // Specific state to specific state
             {
-                // Or throw new InvalidOperationException("Source and target states must not be null.");
-                UnityEngine.Debug.LogError("TransitionConfigurator: Source and target states must be configured before defining the condition.");
-                return;
+                BasicTransition.Connect(FromState, ToState, predicate);
             }
-            BasicTransition.Connect(FromState, ToState, predicate);
+            else // Any state to specific state
+            {
+                BasicTransition.Connect(GraphContext, ToState, predicate);
+            }
         }
 
         /// <summary>
@@ -41,18 +61,16 @@ namespace Nopnag.StateMachineLib
         /// <param name="duration">The time in seconds to wait before the transition occurs.</param>
         public void After(float duration)
         {
-            if (FromState == null || ToState == null)
+            if (ToState == null) { UnityEngine.Debug.LogError(ErrorMessageTargetNull); return; }
+            Func<float, bool> condition = elapsedTime => elapsedTime >= duration; // Explicitly typed delegate
+            if (FromState != null)
             {
-                UnityEngine.Debug.LogError("TransitionConfigurator: Source and target states must be configured before defining the duration.");
-                return;
+                BasicTransition.Connect(FromState, ToState, condition);
             }
-            if (duration < 0)
+            else
             {
-                UnityEngine.Debug.LogWarning("TransitionConfigurator.After: Duration cannot be negative. Transition will likely never occur or occur immediately if duration is 0.");
-                // We could choose to make it immediate if duration is <= 0, or let BasicTransition handle it.
-                // For now, let BasicTransition's predicate (elapsedTime > duration) handle it. If duration is negative, it'll be true immediately.
+                BasicTransition.Connect(GraphContext, ToState, condition);
             }
-            BasicTransition.Connect(FromState, ToState, elapsedTime => elapsedTime >= duration);
         }
 
         /// <summary>
@@ -61,8 +79,15 @@ namespace Nopnag.StateMachineLib
         /// <typeparam name="TEvent">The type of the event to listen for.</typeparam>
         public void On<TEvent>() where TEvent : BusEvent
         {
-            if (FromState == null || ToState == null) { UnityEngine.Debug.LogError(ErrorMessage); return; }
-            TransitionByEvent.Connect<TEvent>(FromState, ToState);
+            if (ToState == null) { UnityEngine.Debug.LogError(ErrorMessageTargetNull); return; }
+            if (FromState != null)
+            {
+                TransitionByEvent.Connect<TEvent>(FromState, ToState);
+            }
+            else
+            {
+                TransitionByEvent.Connect<TEvent>(GraphContext, ToState);
+            }
         }
 
         /// <summary>
@@ -72,8 +97,15 @@ namespace Nopnag.StateMachineLib
         /// <param name="predicate">The condition to check when the event is raised.</param>
         public void On<TEvent>(Func<TEvent, bool> predicate) where TEvent : BusEvent
         {
-            if (FromState == null || ToState == null) { UnityEngine.Debug.LogError(ErrorMessage); return; }
-            TransitionByEvent.Connect<TEvent>(FromState, ToState, predicate);
+            if (ToState == null) { UnityEngine.Debug.LogError(ErrorMessageTargetNull); return; }
+            if (FromState != null)
+            {
+                TransitionByEvent.Connect<TEvent>(FromState, ToState, predicate);
+            }
+            else
+            {
+                TransitionByEvent.Connect<TEvent>(GraphContext, ToState, predicate);
+            }
         }
 
         /// <summary>
@@ -85,16 +117,22 @@ namespace Nopnag.StateMachineLib
         /// <param name="predicate">An optional additional condition to check when the queried event is raised.</param>
         public void On<TEvent>(EventQuery<TEvent> query, Func<TEvent, bool> predicate = null) where TEvent : BusEvent
         {
-            if (FromState == null || ToState == null) { UnityEngine.Debug.LogError(ErrorMessage); return; }
+            if (ToState == null) { UnityEngine.Debug.LogError(ErrorMessageTargetNull); return; }
             if (query == null) { UnityEngine.Debug.LogError("EventQuery cannot be null for TransitionByEvent."); return; }
 
-            if (predicate == null)
+            if (FromState != null)
             {
-                TransitionByEvent.Connect<TEvent>(FromState, ToState, query);
+                if (predicate == null)
+                    TransitionByEvent.Connect<TEvent>(FromState, ToState, query);
+                else
+                    TransitionByEvent.Connect<TEvent>(FromState, ToState, query, predicate);
             }
             else
             {
-                TransitionByEvent.Connect<TEvent>(FromState, ToState, query, predicate);
+                if (predicate == null)
+                    TransitionByEvent.Connect<TEvent>(GraphContext, ToState, query);
+                else
+                    TransitionByEvent.Connect<TEvent>(GraphContext, ToState, query, predicate);
             }
         }
 
@@ -105,8 +143,15 @@ namespace Nopnag.StateMachineLib
         /// <param name="signal">The signal Action to listen to (passed by reference).</param>
         public void On<TActionParam>(ref Action<TActionParam> signal)
         {
-            if (FromState == null || ToState == null) { UnityEngine.Debug.LogError(ErrorMessage); return; }
-            TransitionByAction.Connect<TActionParam>(FromState, ToState, ref signal);
+            if (ToState == null) { UnityEngine.Debug.LogError(ErrorMessageTargetNull); return; }
+            if (FromState != null)
+            {
+                TransitionByAction.Connect<TActionParam>(FromState, ToState, ref signal);
+            }
+            else
+            {
+                TransitionByAction.Connect<TActionParam>(GraphContext, ToState, ref signal);
+            }
         }
         
         /// <summary>
@@ -115,8 +160,15 @@ namespace Nopnag.StateMachineLib
         /// <param name="signal">The parameterless signal Action to listen to (passed by reference).</param>
         public void On(ref Action signal)
         {
-            if (FromState == null || ToState == null) { UnityEngine.Debug.LogError(ErrorMessage); return; }
-            TransitionByAction.Connect(FromState, ToState, ref signal);
+            if (ToState == null) { UnityEngine.Debug.LogError(ErrorMessageTargetNull); return; }
+            if (FromState != null)
+            {
+                TransitionByAction.Connect(FromState, ToState, ref signal);
+            }
+            else
+            {
+                TransitionByAction.Connect(GraphContext, ToState, ref signal);
+            }
         }
 
         /// <summary>
@@ -124,14 +176,17 @@ namespace Nopnag.StateMachineLib
         /// </summary>
         public void Immediately()
         {
-            if (FromState == null || ToState == null)
+            if (ToState == null) { UnityEngine.Debug.LogError(ErrorMessageTargetNull); return; }
+            if (FromState != null)
             {
-                UnityEngine.Debug.LogError("TransitionConfigurator: Source and target states must be configured before defining an immediate transition.");
-                return;
+                DirectTransition.Connect(FromState, ToState);
             }
-            DirectTransition.Connect(FromState, ToState);
+            else
+            {
+                DirectTransition.Connect(GraphContext, ToState);
+            }
         }
 
-        private const string ErrorMessage = "TransitionConfigurator: Source and target states must be configured before defining the condition.";
+        private const string ErrorMessageTargetNull = "TransitionConfigurator: Target state must not be null.";
     }
 } 

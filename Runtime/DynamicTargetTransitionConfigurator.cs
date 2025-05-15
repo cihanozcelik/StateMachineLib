@@ -5,19 +5,37 @@ namespace Nopnag.StateMachineLib
 {
     /// <summary>
     /// Configures a transition where the target state is determined dynamically at runtime.
-    /// This is typically initiated via the fluent API like: <code>sourceUnit > StateGraph.DynamicTarget</code>.
+    /// This is typically initiated via the fluent API like: <code>sourceUnit > StateGraph.DynamicTarget</code>
+    /// or <code>graph.FromAnyToDynamic()</code>.
     /// </summary>
     public readonly struct DynamicTargetTransitionConfigurator
     {
-        private readonly StateUnit _sourceUnit;
+        private readonly StateGraph _graphContext;
+        private readonly StateUnit _sourceUnit; // Null if this is an "Any State" to dynamic target transition
+        // private readonly DynamicTargetMarker _dynamicTargetMarker; // Not strictly needed to store the marker itself
 
         /// <summary>
-        /// Initializes a new instance of the <see cref="DynamicTargetTransitionConfigurator"/> struct.
+        /// Initializes a new instance of the <see cref="DynamicTargetTransitionConfigurator"/> struct for a specific source state.
         /// </summary>
         /// <param name="sourceUnit">The source state unit for the transition.</param>
         public DynamicTargetTransitionConfigurator(StateUnit sourceUnit)
         {
             _sourceUnit = sourceUnit ?? throw new ArgumentNullException(nameof(sourceUnit));
+            _graphContext = sourceUnit.BaseGraph; // Assumes StateUnit has BaseGraph (ParentGraph)
+            if (_graphContext == null) throw new InvalidOperationException("SourceState must be part of a StateGraph.");
+            // _dynamicTargetMarker = StateGraph.DynamicTarget; // Or pass it if it becomes non-static
+        }
+
+        /// <summary>
+        /// Initializes a new instance of the <see cref="DynamicTargetTransitionConfigurator"/> struct for an "Any State" transition.
+        /// </summary>
+        /// <param name="graphContext">The state graph context for this "Any State" transition.</param>
+        /// <param name="dynamicTargetMarker">The dynamic target marker.</param> 
+        internal DynamicTargetTransitionConfigurator(StateGraph graphContext, DynamicTargetMarker dynamicTargetMarker) // Added marker for signature
+        {
+            _graphContext = graphContext ?? throw new ArgumentNullException(nameof(graphContext));
+            _sourceUnit = null; // Indicates "Any State"
+            // _dynamicTargetMarker = dynamicTargetMarker;
         }
 
         /// <summary>
@@ -32,7 +50,14 @@ namespace Nopnag.StateMachineLib
         {
             if (dynamicTargetPredicate == null) throw new ArgumentNullException(nameof(dynamicTargetPredicate));
 
-            return ConditionalTransition.Connect(_sourceUnit, dynamicTargetPredicate);
+            if (_sourceUnit != null) // Specific state to dynamic target
+            {
+                return ConditionalTransition.Connect(_sourceUnit, dynamicTargetPredicate);
+            }
+            else // Any state to dynamic target
+            {
+                return ConditionalTransition.Connect(_graphContext, dynamicTargetPredicate);
+            }
         }
     }
 } 
