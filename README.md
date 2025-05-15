@@ -6,11 +6,89 @@ A lightweight and flexible state machine library for C# and Unity, designed for 
 
 StateMachineLib provides tools to structure application logic into distinct states and define transitions between them. It allows for multiple state graphs running concurrently and supports various ways to trigger transitions, including conditions, events (via `Nopnag.EventBusLib`), and direct calls.
 
+## API Usage Quick Reference
+
+```csharp
+// --- Core Setup & Lifecycle ---
+StateMachine stateMachine = new StateMachine();
+StateGraph mainGraph = stateMachine.CreateGraph();
+StateUnit state1 = mainGraph.CreateState(); // Preferred
+// StateUnit namedState = mainGraph.CreateUnit("NamedState"); // Deprecated: If a name is needed, manage externally
+mainGraph.InitialUnit = state1; // Or first created is initial by default
+stateMachine.Start(); // Enters initial state of all graphs
+stateMachine.UpdateMachine();       // Call in game loop (e.g., Unity's Update)
+stateMachine.FixedUpdateMachine();  // Call in game loop (e.g., Unity's FixedUpdate)
+stateMachine.LateUpdateMachine();   // Call in game loop (e.g., Unity's LateUpdate)
+stateMachine.Exit(); // Exits all graphs and their current states
+
+// --- StateUnit Logic Actions ---
+state1.OnEnter = () => { /* Logic for StateOne Enter */ };
+state1.OnUpdate = (timeInState) => { /* Logic for StateOne Update, timeInState is DeltaTimeSinceStart */ };
+state1.OnExit = () => { /* Logic for StateOne Exit */ };
+state1.OnFixedUpdate = (timeInState) => { /* Logic for StateOne FixedUpdate, timeInState is DeltaTimeSinceStart */ };
+state1.OnLateUpdate = (timeInState) => { /* Logic for StateOne LateUpdate, timeInState is DeltaTimeSinceStart */ };
+// state1.OnUpdateBeforeTransitionCheck = (timeInState) => { /* Optional: Logic before transitions, timeInState is DeltaTimeSinceStart */ };
+
+// --- Time-Based Callbacks (within StateUnit) ---
+state1.At(2.0f, () => { /* Action after 2 seconds in state1 */ });
+state1.AtEvery(1.0f, () => { /* Action every 1 second in state1 */ });
+
+// --- Event/Signal Listening (within StateUnit, while active) ---
+// Assumes: using Nopnag.EventBusLib;
+// public class MyGameEvent : BusEvent { public int Value; }
+// public class MyParam : IParameter {}
+// public Action MySignalAction;
+// public Action<int> MySignalActionWithParam;
+state1.On<MyGameEvent>(evt => { /* Handle MyGameEvent, e.g., Debug.Log(evt.Value) */ });
+state1.On<MyGameEvent>(EventBus<MyGameEvent>.Where<MyParam>("filterKey"), evt => { /* Handle filtered MyGameEvent */ });
+state1.On(ref MySignalAction, () => { /* Handle MySignalAction when invoked */ });
+state1.On(ref MySignalActionWithParam, (paramValue) => { /* Handle MySignalActionWithParam(paramValue) */ });
+
+// --- Subgraphs / Hierarchical States ---
+StateUnit parentState = mainGraph.CreateState();
+StateGraph subGraph = parentState.GetSubStateGraph(); // Creates and assigns a new subgraph
+// parentState.SetSubStateGraph(new StateGraph()); // Alternative: assign an existing graph
+StateUnit childState1 = subGraph.CreateState();
+subGraph.InitialUnit = childState1; // Set initial state for the subgraph
+
+// --- Fluent Transition Creation API ---
+// Assumes: StateUnit state1, state2, state3; MyGameEvent, MyParam, MyFluentSignal etc. defined.
+// 1. Transition by Condition or Time
+(state1 > state2).When(elapsedTime => elapsedTime > 2.0f && SomeGlobalCondition());
+(state2 < state1).When(elapsedTime => elapsedTime > 2.0f); // (target < source) is equivalent
+(state1 > state2).After(3.5f); // After a specific duration
+
+// 2. Transition by Event
+(state1 > state2).On<MyGameEvent>();
+(state1 > state2).On<MyGameEvent>(evt => evt.Value > 5); // With predicate
+(state1 > state2).On(EventBus<MyGameEvent>.Where<MyParam>("filterKey")); // With query
+(state1 > state2).On(EventBus<MyGameEvent>.Where<MyParam>("filterKey"), evt => evt.Value > 5); // Query + predicate
+
+// 3. Transition by Action
+// public Action MyFluentSignal;
+(state1 > state2).On(ref MyFluentSignal);
+// public Action<int> MyFluentSignalWithParam;
+// (state1 > state2).On(ref MyFluentSignalWithParam); // With parameter
+
+// 4. Direct Transition
+(state1 > state2).Immediately();
+
+// 5. Transition to Indexed Target (from State to Array of States)
+(state1 > new[] { state2, state3 }).When(
+    elapsedTime => elapsedTime < 2.0f ? 0 : (elapsedTime < 5.0f ? 1 : -1) 
+    ); // Ex: to state2 if <2s, to state3 if <5s (-1 means no change)
+
+// 6. Transition to Dynamically Selected Target (from State to Dynamic Target Marker)
+(state1 > StateGraph.DynamicTarget).When(
+    elapsedTime => elapsedTime > 4.0f ? state2 : (elapsedTime > 1.0f ? state3 : null) 
+    ); // Ex: to state2 if >4s, to state3 if >1s, else no change
+```
+
 ## Key Features
 
 *   **Multiple Graphs:** Manage multiple independent state machines (`StateMachine` containing `StateGraph` instances) running in parallel.
 *   **State Units (`StateUnit`):** Define individual states with `Enter`, `Exit`, `Update`, `LateUpdate`, and `FixedUpdate` logic.
-*   **Rich Transition System:** Multiple ways to define transitions between states (`IStateTransition` implementations).
+*   **Rich Transition System:** Multiple ways to define transitions between states using a fluent API.
 *   **Time Tracking:** `StateUnit` tracks the time elapsed since it became active (`DeltaTimeSinceStart`).
 *   **Sub-States / Hierarchical States:** `StateUnit` can host its own `StateGraph` for complex, nested state logic.
 *   **EventBus Integration:** Trigger transitions based on events from `Nopnag.EventBusLib`.
@@ -47,14 +125,14 @@ StateMachineLib provides tools to structure application logic into distinct stat
     // namedIdleState.Name will be "Idle".
 
     idleState.OnEnter = () => Debug.Log("Idling..."); // Preferred way to assign actions
-    idleState.OnUpdate = (deltaTime) => { /* Do idle stuff */ }; // Preferred
+    idleState.OnUpdate = (timeInState) => { /* Do idle stuff. timeInState is DeltaTimeSinceStart */ }; // Preferred
     
     // Older, deprecated way of assigning actions:
     // idleState.EnterStateFunction = () => Debug.Log("Idling..."); 
-    // idleState.UpdateStateFunction = (deltaTime) => { /* Do idle stuff */ };
+    // idleState.UpdateStateFunction = (timeInState) => { /* Do idle stuff. timeInState is DeltaTimeSinceStart */ };
     ```
 
-*   **`IStateTransition`**: The interface for all transition types. Defines the `CheckTransition` method, which determines if a transition should occur and outputs the target `StateUnit`.
+*   **`IStateTransition`**: The interface for all transition types that are checked during the `Update` loop of a `StateUnit`. Defines the `CheckTransition` method. (Event/Action based transitions trigger more directly).
 
 ## Listening to Events & Signals Only While a State is Active
 
@@ -75,7 +153,7 @@ myState.On<MyEvent>(evt => { // Preferred
 var query = EventBus<MyEvent>.Where<MyParam>(myValue);
 // myState.Listen(query, ...); // Deprecated
 myState.On(query, evt => { // Preferred
-    Debug.Log($"MyEvent with param received in state: {myState.Name}\");
+    Debug.Log($"MyEvent with param received in state: {myState.Name}");
 });
 ```
 
@@ -147,15 +225,15 @@ StateUnit shootingState = combatSubgraph.CreateState();
 combatState.SetSubStateGraph(combatSubgraph);
 // Or: combatState.GetSubStateGraph() returns a new graph and assigns it
 
-// Define transition into the combat state
-TransitionByEvent.Connect<EnemyDetectedEvent>(patrollingState, combatState);
+// Define transition into the combat state using the fluent API
+// (patrollingState > combatState).On<EnemyDetectedEvent>(); // Example using Fluent API
 
 // ... other setup ...
 
 stateMachine.Start();
 
 // When patrollingState transitions to combatState:
-// 1. combatState.OnEnter runs (previously EnterStateFunction).
+// 1. combatState.OnEnter runs.
 // 2. combatSubgraph.EnterGraph() runs, starting its initial state (e.g., aimingState).
 // 3. While combatState is active, combatSubgraph is updated via combatState's Update/FixedUpdate/LateUpdate.
 ```
@@ -205,86 +283,9 @@ myState.At(2.5f, () => {
 });
 ```
 
-## Transition Types
+## Fluent Transition API
 
-Transitions define how the state machine moves from one `StateUnit` to another. `TransitionByAction` and `TransitionByEvent` directly trigger state changes, while the others are evaluated during the source state's `Update` loop.
-
-*   **`BasicTransition`**:
-    *   **How:** Connects two states based on a predicate evaluating to true/false.
-    *   **Trigger:** `predicate(elapsedTimeInState)` returns `true`.
-    *   **Usage:** 
-        ```csharp
-        // Transition from 'charging' to 'ready' after 2 seconds
-        BasicTransition.Connect(chargingState, readyState, 
-            elapsedTime => elapsedTime > 2.0f);
-        ```
-
-*   **`ConditionalTransition`**:
-    *   **How:** Connects a state to a dynamically chosen target state based on a predicate.
-    *   **Trigger:** `predicate(elapsedTimeInState)` returns a non-null `StateUnit`.
-    *   **Usage:** 
-        ```csharp
-        // Transition from 'patrolling' to 'chasing' or 'searching'
-        ConditionalTransition.Connect(patrollingState, 
-            elapsedTime => {
-                if (CanSeePlayer()) return chasingState;
-                if (HeardNoise()) return searchingState;
-                return null; // Stay in patrolling state
-            });
-        ```
-
-*   **`ConditionalTransitionByIndex`**:
-    *   **How:** Connects a state to one of several target states based on an index returned by a predicate.
-    *   **Trigger:** `predicate(elapsedTimeInState)` returns a valid, non-negative index into the `targetStateInfos` array.
-    *   **Usage:**
-        ```csharp
-        // Transition from 'aiming' based on weapon type index
-        StateUnit[] fireStates = { firePistolState, fireRifleState };
-        ConditionalTransitionByIndex.Connect(aimingState, fireStates,
-            elapsedTime => GetEquippedWeaponIndex()); // Returns 0 or 1, or -1
-        ```
-
-*   **`DirectTransition`**:
-    *   **How:** Connects two states unconditionally.
-    *   **Trigger:** Always triggers if checked. Use carefully, often as the last transition checked in a state.
-    *   **Usage:** 
-        ```csharp
-        // Immediately go from 'initializing' to 'idle'
-        DirectTransition.Connect(initializingState, idleState);
-        ```
-
-*   **`TransitionByAction`**:
-    *   **How:** Connects two states; transition occurs when a specific `Action` is invoked.
-    *   **Trigger:** The `ref Action signal` is invoked externally.
-    *   **Important:** Bypasses the regular check flow. Triggers *only if* the `baseUnit` is currently active.
-    *   **Usage:** 
-        ```csharp
-        // In setup:
-        public Action PlayerJumped;
-        TransitionByAction.Connect(groundedState, jumpingState, ref PlayerJumped);
-        
-        // Elsewhere (e.g., Input Handling):
-        if (Input.GetButtonDown("Jump")) PlayerJumped?.Invoke();
-        ```
-
-*   **`TransitionByEvent`**:
-    *   **How:** Connects two states; transition occurs when a specific `EventBusLib` event is raised.
-    *   **Trigger:** An event of type `T` is raised via `EventBus<T>.Raise(...)`.
-    *   **Optional Predicate:** Can filter events further with `Func<T, bool>`.
-    *   **Important:** Bypasses the regular check flow. Triggers *only if* the `baseUnit` is active (and predicate passes).
-    *   **Usage:**
-        ```csharp
-        // Simple event trigger
-        TransitionByEvent.Connect<PlayerDiedEvent>(aliveState, gameOverState);
-
-        // Conditional event trigger
-        TransitionByEvent.Connect<EnemySpottedEvent>(patrollingState, alertState, 
-            evt => evt.EnemyType == Enemy.EliteGuard);
-        ```
-
-## Fluent Transition API (Alternative Syntax)
-
-As an alternative to the static `Connect` methods on transition types, a more fluent syntax is available for defining transitions directly from `StateUnit` instances. This API uses operator overloading (`>` and `<`) and chained method calls.
+A fluent syntax is available for defining transitions directly from `StateUnit` instances. This API uses operator overloading (`>` and `<`) and chained method calls.
 
 This fluent approach is designed with structs to minimize garbage generation during transition setup.
 
@@ -412,7 +413,7 @@ StateUnit optionCState = myGraph.CreateState();
 
 ### `(fromState > StateGraph.DynamicTarget).When(dynamicTargetPredicate)`:
 
-This defines a `ConditionalTransition` where the target state is determined at runtime by the `dynamicTargetPredicate`. This is the fluent equivalent of the static `ConditionalTransition.Connect(fromState, dynamicTargetPredicate)` method.
+This defines a `ConditionalTransition` where the target state is determined at runtime by the `dynamicTargetPredicate`. 
 
 You initiate this by transitioning from a state to the special `StateGraph.DynamicTarget` marker. The subsequent `.When()` method then takes a predicate of type `Func<float, StateUnit>`.
 
@@ -441,15 +442,14 @@ This example demonstrates a character controller with Idle, Moving, Jumping, and
 
 ```csharp
 using Nopnag.StateMachineLib;
-using Nopnag.StateMachineLib.Transition;
-using Nopnag.EventBusLib; // For JumpInputEvent and DamageTakenEvent
+// using Nopnag.StateMachineLib.Transition; // Not needed if only using Fluent API
+using Nopnag.EventBusLib; // For MyEvent, DamageTakenEvent etc.
 using UnityEngine;
 using System;
 
-// --- Define Events used for Transitions ---
-public class DamageTakenEvent : BusEvent 
-{
-}
+// --- Define Events used for Transitions (if not already globally defined) ---
+// public class DamageTakenEvent : BusEvent { } 
+// public class JumpInputEvent : BusEvent { } // Example if using event for jump
 
 public class CharacterController : MonoBehaviour
 {
@@ -460,6 +460,9 @@ public class CharacterController : MonoBehaviour
     private Rigidbody rb;
     private float jumpForce = 5f;
     private float _stunDuration = 0.5f; // How long stun lasts
+
+    // Example: Action for jump if not using EventBus for it
+    // public Action OnJumpButtonPressed; 
 
     void Awake()
     {
@@ -482,14 +485,15 @@ public class CharacterController : MonoBehaviour
         idleState.OnEnter = () => { 
             Debug.Log("Entering Idle State"); 
         };
-        idleState.OnUpdate = (dt) => { /* Maybe play idle animation */ };
+        idleState.OnUpdate = (timeInState) => { /* Maybe play idle animation. timeInState is DeltaTimeSinceStart */ };
         
         movingState.OnEnter = () => Debug.Log("Entering Moving State");
-        movingState.OnUpdate = (dt) => 
+        movingState.OnUpdate = (timeInState) => 
         { 
             // Apply movement force based on input (simplified)
+            // timeInState is DeltaTimeSinceStart, you might want Time.deltaTime for physics
             Vector3 moveDir = GetMovementInput(); 
-            rb.AddForce(moveDir * 10f);
+            rb.AddForce(moveDir * 10f * Time.deltaTime); // Example using Time.deltaTime for force application
         };
 
         jumpingState.OnEnter = () => 
@@ -499,49 +503,58 @@ public class CharacterController : MonoBehaviour
         };
         
         stunnedState.OnEnter = () => Debug.Log("Entering Stunned State");
-        stunnedState.OnUpdate = (dt) => { /* Maybe play stunned animation */ };
+        stunnedState.OnUpdate = (timeInState) => { /* Maybe play stunned animation. timeInState is DeltaTimeSinceStart */ };
 
-        // --- 3. Define Transitions --- 
+        // --- 3. Define Transitions (using Fluent API) --- 
 
         // --- Transitions TO Stunned (Triggered directly by DamageTakenEvent) ---
-        TransitionByEvent.Connect<DamageTakenEvent>(idleState, stunnedState);
-        TransitionByEvent.Connect<DamageTakenEvent>(movingState, stunnedState);
-        TransitionByEvent.Connect<DamageTakenEvent>(jumpingState, stunnedState);
+        (idleState > stunnedState).On<DamageTakenEvent>();
+        (movingState > stunnedState).On<DamageTakenEvent>();
+        (jumpingState > stunnedState).On<DamageTakenEvent>();
 
         // --- Transition FROM Stunned ---
         // Go back to Idle after the stun duration
-        BasicTransition.Connect(stunnedState, idleState, 
-            elapsedTime => elapsedTime > _stunDuration);
+        (stunnedState > idleState).After(_stunDuration);
 
         // --- Normal Movement Transitions ---
         // Idle -> Moving
-        BasicTransition.Connect(idleState, movingState,
-            elapsedTime => GetMovementInput().magnitude > 0.1f);
+        (idleState > movingState).When(elapsedTime => GetMovementInput().magnitude > 0.1f);
 
         // Moving -> Idle
-        BasicTransition.Connect(movingState, idleState,
-            elapsedTime => GetMovementInput().magnitude <= 0.1f);
+        (movingState > idleState).When(elapsedTime => GetMovementInput().magnitude <= 0.1f);
 
-        // Idle -> Jumping (Using BasicTransition with direct input check)
-        // TransitionByEvent.Connect<JumpInputEvent>(idleState, jumpingState);
-        BasicTransition.Connect(idleState, jumpingState,
-            elapsedTime => Input.GetButtonDown("Jump"));
+        // Idle -> Jumping (Using Fluent API with direct input check)
+        (idleState > jumpingState).When(elapsedTime => Input.GetButtonDown("Jump"));
+        // Or, if using an Action signal for jump:
+        // (idleState > jumpingState).On(ref OnJumpButtonPressed);
+        // Or, if using an EventBus event for jump:
+        // (idleState > jumpingState).On<JumpInputEvent>();
 
-        // Moving -> Jumping (Using BasicTransition with direct input check)
-        // TransitionByEvent.Connect<JumpInputEvent>(movingState, jumpingState);
-        BasicTransition.Connect(movingState, jumpingState,
-            elapsedTime => Input.GetButtonDown("Jump"));
 
-        BasicTransition.Connect(jumpingState, idleState, 
-            elapsedTime => elapsedTime > 1.0f); 
+        // Moving -> Jumping (Using Fluent API with direct input check)
+        (movingState > jumpingState).When(elapsedTime => Input.GetButtonDown("Jump"));
+        // Or, if using an Action signal for jump:
+        // (movingState > jumpingState).On(ref OnJumpButtonPressed);
+        // Or, if using an EventBus event for jump:
+        // (movingState > jumpingState).On<JumpInputEvent>();
+
+        // Jumping -> Idle (e.g., after a fixed time, or when grounded)
+        (jumpingState > idleState).After(1.0f); 
+        // Or, a more realistic scenario:
+        // (jumpingState > idleState).When(elapsedTime => IsGrounded() && elapsedTime > 0.2f);
+
 
         // --- 4. Start the State Machine ---
+        movementGraph.InitialUnit = idleState; // Explicitly set if not already the first created
         stateMachine.Start();
 
     }
 
     void Update()
     {
+        // Example of invoking an Action signal for jump
+        // if (Input.GetButtonDown("Jump")) OnJumpButtonPressed?.Invoke();
+        
         stateMachine.UpdateMachine();
     }
 
@@ -556,6 +569,13 @@ public class CharacterController : MonoBehaviour
         float vertical = Input.GetAxis("Vertical");
         return new Vector3(horizontal, 0, vertical).normalized;
     }
+
+    // Example helper for a more realistic jump transition
+    // bool IsGrounded() 
+    // {
+    //     // Check if character is grounded, e.g., using a Raycast
+    //     return Physics.Raycast(transform.position, Vector3.down, 0.1f); 
+    // }
 }
 
 ## Installation
