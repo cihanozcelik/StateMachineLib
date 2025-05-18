@@ -15,7 +15,9 @@ namespace Nopnag.StateMachineLib.Transition
     {
       if (sourceUnit == null) throw new ArgumentNullException(nameof(sourceUnit));
       if (targetUnit == null) throw new ArgumentNullException(nameof(targetUnit));
-      EventBus<T>.Listen(
+      if (sourceUnit.BaseGraph == null) throw new InvalidOperationException("SourceUnit must be associated with a StateGraph.");
+
+      IIListener handle = EventBus<T>.Listen(
         @event =>
         {
           if (sourceUnit.BaseGraph != null && sourceUnit.BaseGraph.IsUnitActive(sourceUnit)) 
@@ -24,6 +26,7 @@ namespace Nopnag.StateMachineLib.Transition
           }
         }
       );
+      sourceUnit.BaseGraph.RegisterEventTransitionListener(handle);
     }
 
     public static void Connect<T>(StateUnit sourceUnit, StateUnit targetUnit, Func<T, bool> predicate)
@@ -32,7 +35,9 @@ namespace Nopnag.StateMachineLib.Transition
       if (sourceUnit == null) throw new ArgumentNullException(nameof(sourceUnit));
       if (targetUnit == null) throw new ArgumentNullException(nameof(targetUnit));
       if (predicate == null) throw new ArgumentNullException(nameof(predicate));
-      EventBus<T>.Listen(
+      if (sourceUnit.BaseGraph == null) throw new InvalidOperationException("SourceUnit must be associated with a StateGraph.");
+
+      IIListener handle = EventBus<T>.Listen(
         @event =>
         {
           if (sourceUnit.BaseGraph != null && sourceUnit.BaseGraph.IsUnitActive(sourceUnit) && predicate(@event)) 
@@ -41,6 +46,7 @@ namespace Nopnag.StateMachineLib.Transition
           }
         }
       );
+      sourceUnit.BaseGraph.RegisterEventTransitionListener(handle);
     }
 
     public static void Connect<T>(StateUnit sourceUnit, StateUnit targetUnit, EventQuery<T> query)
@@ -49,7 +55,9 @@ namespace Nopnag.StateMachineLib.Transition
       if (sourceUnit == null) throw new ArgumentNullException(nameof(sourceUnit));
       if (targetUnit == null) throw new ArgumentNullException(nameof(targetUnit));
       if (query == null) throw new ArgumentNullException(nameof(query));
-      query.Listen(
+      if (sourceUnit.BaseGraph == null) throw new InvalidOperationException("SourceUnit must be associated with a StateGraph.");
+
+      IIListener handle = query.Listen(
         @event =>
         {
           if (sourceUnit.BaseGraph != null && sourceUnit.BaseGraph.IsUnitActive(sourceUnit)) 
@@ -58,6 +66,7 @@ namespace Nopnag.StateMachineLib.Transition
           }
         }
       );
+      sourceUnit.BaseGraph.RegisterEventTransitionListener(handle);
     }
 
     public static void Connect<T>(StateUnit sourceUnit, StateUnit targetUnit, EventQuery<T> query, Func<T, bool> predicate)
@@ -67,7 +76,9 @@ namespace Nopnag.StateMachineLib.Transition
       if (targetUnit == null) throw new ArgumentNullException(nameof(targetUnit));
       if (query == null) throw new ArgumentNullException(nameof(query));
       if (predicate == null) throw new ArgumentNullException(nameof(predicate));
-      query.Listen(
+      if (sourceUnit.BaseGraph == null) throw new InvalidOperationException("SourceUnit must be associated with a StateGraph.");
+
+      IIListener handle = query.Listen(
         @event =>
         {
           if (sourceUnit.BaseGraph != null && sourceUnit.BaseGraph.IsUnitActive(sourceUnit) && predicate(@event)) 
@@ -76,6 +87,7 @@ namespace Nopnag.StateMachineLib.Transition
           }
         }
       );
+      sourceUnit.BaseGraph.RegisterEventTransitionListener(handle);
     }
 
     // --- Transitions from Any State within a StateGraph ---
@@ -83,7 +95,8 @@ namespace Nopnag.StateMachineLib.Transition
     {
       if (graphContext == null) throw new ArgumentNullException(nameof(graphContext));
       if (targetUnit == null) throw new ArgumentNullException(nameof(targetUnit));
-      EventBus<T>.Listen(
+
+      IIListener handle = EventBus<T>.Listen(
         @event =>
         {
           if (graphContext.IsGraphActive) 
@@ -92,6 +105,7 @@ namespace Nopnag.StateMachineLib.Transition
           }
         }
       );
+      graphContext.RegisterEventTransitionListener(handle);
     }
 
     public static void Connect<T>(StateGraph graphContext, StateUnit targetUnit, Func<T, bool> predicate)
@@ -100,7 +114,8 @@ namespace Nopnag.StateMachineLib.Transition
       if (graphContext == null) throw new ArgumentNullException(nameof(graphContext));
       if (targetUnit == null) throw new ArgumentNullException(nameof(targetUnit));
       if (predicate == null) throw new ArgumentNullException(nameof(predicate));
-      EventBus<T>.Listen(
+
+      IIListener handle = EventBus<T>.Listen(
         @event =>
         {
           if (graphContext.IsGraphActive && predicate(@event)) 
@@ -109,6 +124,7 @@ namespace Nopnag.StateMachineLib.Transition
           }
         }
       );
+      graphContext.RegisterEventTransitionListener(handle);
     }
 
     public static void Connect<T>(StateGraph graphContext, StateUnit targetUnit, EventQuery<T> query)
@@ -117,7 +133,8 @@ namespace Nopnag.StateMachineLib.Transition
       if (graphContext == null) throw new ArgumentNullException(nameof(graphContext));
       if (targetUnit == null) throw new ArgumentNullException(nameof(targetUnit));
       if (query == null) throw new ArgumentNullException(nameof(query));
-      query.Listen(
+
+      IIListener handle = query.Listen(
         @event =>
         {
           if (graphContext.IsGraphActive) 
@@ -126,6 +143,7 @@ namespace Nopnag.StateMachineLib.Transition
           }
         }
       );
+      graphContext.RegisterEventTransitionListener(handle);
     }
 
     public static void Connect<T>(StateGraph graphContext, StateUnit targetUnit, EventQuery<T> query, Func<T, bool> predicate)
@@ -135,7 +153,8 @@ namespace Nopnag.StateMachineLib.Transition
       if (targetUnit == null) throw new ArgumentNullException(nameof(targetUnit));
       if (query == null) throw new ArgumentNullException(nameof(query));
       if (predicate == null) throw new ArgumentNullException(nameof(predicate));
-      query.Listen(
+
+      IIListener handle = query.Listen(
         @event =>
         {
           if (graphContext.IsGraphActive && predicate(@event)) 
@@ -144,6 +163,7 @@ namespace Nopnag.StateMachineLib.Transition
           }
         }
       );
+      graphContext.RegisterEventTransitionListener(handle);
     }
   }
 }

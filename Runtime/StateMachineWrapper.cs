@@ -69,7 +69,7 @@ public class StateMachineWrapper : IDisposable
         }
         _isDisposed = true;
 
-        StateMachine?.Exit(); 
+        StateMachine?.Dispose();
 
         if (ManualEventManager.Instance != null)
         {

@@ -95,6 +95,7 @@ namespace Nopnag.StateMachineLib
     readonly List<PeriodicCallback> _periodicCallbacks = new();
     float _previousTime;
     StateGraph _subGraph;
+    private List<IIListener> _stateUnitEventBusListeners = new List<IIListener>();
 
     public StateUnit(string name, StateGraph graph)
     {
@@ -144,6 +145,13 @@ namespace Nopnag.StateMachineLib
     {
       _subGraph?.ExitGraph();
       ExitStateFunction?.Invoke();
+
+      // Unsubscribe EventBus listeners
+      foreach (var listener in _stateUnitEventBusListeners)
+      {
+        listener.Unsubscribe();
+      }
+      _stateUnitEventBusListeners.Clear();
     }
 
     internal void FixedUpdate()
@@ -158,9 +166,10 @@ namespace Nopnag.StateMachineLib
       return _subGraph;
     }
 
-    internal bool IsActive()
+    public bool IsActive()
     {
-      return BaseGraph.IsUnitActive(this);
+      // Check if the BaseGraph is active and this unit is the current unit in its BaseGraph
+      return BaseGraph != null && BaseGraph.IsGraphActive && BaseGraph.CurrentUnit == this;
     }
 
     internal void LateUpdate()
@@ -177,12 +186,13 @@ namespace Nopnag.StateMachineLib
     [Obsolete("Use On<T>(listener) instead.", false)]
     public void Listen<T>(ListenerDelegate<T> listener) where T : BusEvent
     {
-      EventBus<T>.Listen(
+      IIListener handle = EventBus<T>.Listen(
         @event =>
         {
           if (IsActive()) listener.Invoke(@event);
         }
       );
+      _stateUnitEventBusListeners.Add(handle);
     }
 
     /// <summary>
@@ -192,7 +202,7 @@ namespace Nopnag.StateMachineLib
     /// <param name="listener">The callback to invoke when the event is raised and this state is active.</param>
     public void On<T>(ListenerDelegate<T> listener) where T : BusEvent
     {
-        Listen(listener);
+      Listen(listener);
     }
 
     /// <summary>
@@ -204,12 +214,13 @@ namespace Nopnag.StateMachineLib
     [Obsolete("Use On<T>(query, listener) instead.", false)]
     public void Listen<T>(EventQuery<T> query, ListenerDelegate<T> listener) where T : BusEvent
     {
-      query.Listen(
+      IIListener handle = query.Listen(
         @event =>
         {
           if (IsActive()) listener.Invoke(@event);
         }
       );
+      _stateUnitEventBusListeners.Add(handle);
     }
 
     /// <summary>
