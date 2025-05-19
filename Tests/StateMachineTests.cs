@@ -14,6 +14,7 @@ namespace Nopnag.StateMachineLib.Tests
     public class TestEventA : BusEvent { }
     public class TestEventB : BusEvent { }
     public class TestDamageEvent : BusEvent { }
+    public class TestEvent : BusEvent { } // Added from DisposalTests
 
     public class StateMachineTests
     {
@@ -1804,4 +1805,177 @@ namespace Nopnag.StateMachineLib.Tests
             WasDestroyed = true;
         }
     }
-} // End of namespace
+
+    // Copied from StateMachineDisposalTests.cs
+    // Public TestEvent is already added near the top of the namespace.
+    public class StateMachineDisposalTests // This class should be inside the namespace Nopnag.StateMachineLib.Tests
+    {
+        private class TestMonoBehaviour : MonoBehaviour // This is specific to disposal tests
+        {
+            public StateMachine ManagedStateMachine { get; private set; }
+
+            void Awake()
+            {
+                ManagedStateMachine = this.CreateManagedStateMachine(); 
+            }
+        }
+
+        private int _eventHandlerCallCount_disposal; 
+        private StateMachine _sm_disposal; 
+        private StateUnit _s1_disposal; 
+        private StateUnit _s2_disposal; 
+
+        [SetUp]
+        public void Disposal_Setup()
+        {
+            _eventHandlerCallCount_disposal = 0;
+            // Ensure ManualEventManager instance exists for wrapper tests if it's created on demand by wrapper
+            // and tests run in an environment where it might not be auto-created.
+            // For editor tests, this is usually fine.
+        }
+        
+        private void Disposal_EventListener(TestEvent e) 
+        {
+            _eventHandlerCallCount_disposal++;
+        }
+
+        private void SetupStateMachineWithListeners_ForDisposalTest(StateMachine sm) 
+        {
+            var graph = sm.CreateGraph();
+            _s1_disposal = graph.CreateState();
+            _s2_disposal = graph.CreateState(); 
+
+            graph.InitialUnit = _s1_disposal;
+
+            _s1_disposal.On<TestEvent>(Disposal_EventListener);
+            (_s1_disposal > _s2_disposal).On<TestEvent>(); 
+
+            sm.Start(); 
+        }
+
+        [Test]
+        public void ManualDispose_UnsubscribesEventListeners_DisposalTest()
+        {
+            _sm_disposal = new StateMachine();
+            SetupStateMachineWithListeners_ForDisposalTest(_sm_disposal);
+
+            EventBus.Raise(new TestEvent());
+            _sm_disposal.UpdateMachine(); // Ensure event processing and transitions
+
+            Assert.AreEqual(1, _eventHandlerCallCount_disposal, "DisposalTest: StateUnit listener should have been called once before dispose.");
+            // Assert.IsTrue(_s1_disposal.IsActive(), "DisposalTest: _s1_disposal should be active before dispose."); // This state should be false if transition to s2 occurred
+            // Check that transition to _s2_disposal occurred due to the event
+            Assert.IsTrue(_s2_disposal.IsActive(), "DisposalTest: _s2_disposal should be active after first event (transition).");
+
+
+            _sm_disposal.Dispose();
+            _eventHandlerCallCount_disposal = 0; 
+            // After dispose, the original _s2_disposal is no longer the current state of any active graph in _sm_disposal
+            // Raising another event should not call the listener, and should not transition anything in the disposed SM.
+
+            EventBus.Raise(new TestEvent());
+            Assert.AreEqual(0, _eventHandlerCallCount_disposal, "DisposalTest: StateUnit listener should NOT be called after dispose.");
+            
+            // Verify that no state is active or that the state did not change again in the disposed SM context.
+            // Since the SM is disposed, its graphs are exited, and units are no longer "active" in that SM.
+            // Accessing _s1_disposal.IsActive() might be misleading if the underlying graph is gone or inactive.
+            // A key test is that the event handler count remains 0.
+            // We can also assert that an attempt to use the disposed SM throws an exception.
+            Assert.Throws<ObjectDisposedException>(() => {
+                _sm_disposal.CreateGraph(); // Attempt to use disposed SM
+            });
+        }
+
+        [UnityTest]
+        public IEnumerator WrapperDispose_UnsubscribesEventListeners_DisposalTest()
+        {
+            var go = new GameObject("TestGO_DisposalWrapper");
+            var testMb = go.AddComponent<TestMonoBehaviour>(); // Uses the inner TestMonoBehaviour for disposal tests
+            
+           
+
+            Assert.IsNotNull(testMb.ManagedStateMachine, "DisposalTest: Managed StateMachine should be created.");
+            
+            StateMachine managedSM = testMb.ManagedStateMachine;
+            // Need to use local variables for states and listener for this test scope
+            StateUnit local_s1 = null;
+            StateUnit local_s2 = null;
+            int local_callCount = 0;
+            Nopnag.EventBusLib.ListenerDelegate<TestEvent> local_listener =  e =>
+            {
+                Debug.Log("Local call in WrapperDispose"); local_callCount++; };
+
+            var graph = managedSM.CreateGraph();
+            local_s1 = graph.CreateState();
+            local_s2 = graph.CreateState(); 
+            graph.InitialUnit = local_s1;
+            local_s1.On<TestEvent>(local_listener);
+            (local_s1 > local_s2).On<TestEvent>(); // UNCOMMENT THIS LINE
+            managedSM.Start(); // RE-ADD THIS LINE
+
+            yield return null; // Allow SM to process Start
+            
+            Debug.Log("Current unit after Start and yield in WrapperDispose: " + graph.CurrentUnit?.Name);
+            Assert.IsTrue(local_s1.IsActive(), "DisposalTest: Wrapper - local_s1 should be active after Start and before raising event.");
+            
+            EventBus.Raise(new TestEvent());
+            managedSM.UpdateMachine(); // Manually call UpdateMachine to process the event
+            Assert.AreEqual(1, local_callCount, "DisposalTest: Wrapper - Listener on local_s1 should have been called once before MB destroy.");
+            Assert.IsTrue(local_s2.IsActive(), "DisposalTest: Wrapper - local_s2 should be active after first event (transition)."); // UNCOMMENT THIS ASSERT
+
+            UnityEngine.Object.DestroyImmediate(go); 
+            
+            yield return null; // Allow wrapper to process destruction and dispose the SM
+
+            local_callCount = 0; 
+            EventBus.Raise(new TestEvent());
+            yield return null;
+            Assert.AreEqual(0, local_callCount, "DisposalTest: Wrapper - Listener should NOT be called after MB destroy.");
+
+            // Verify the state machine is disposed
+            Assert.Throws<ObjectDisposedException>(() => {
+                 managedSM.CreateGraph(); // Attempt to use disposed SM
+            }, "DisposalTest: Wrapper - Accessing the disposed StateMachine should throw ObjectDisposedException.");
+        }
+
+        [Test]
+        public void ManualDispose_UnsubscribesEventDrivenTransition_DisposalTest()
+        {
+            _sm_disposal = new StateMachine();
+            // Use the fields from Disposal_Setup for convenience, assuming they are reset or this test manages them.
+            // If _s1_disposal and _s2_disposal are not reset by Setup, declare them locally.
+            var graph = _sm_disposal.CreateGraph();
+            _s1_disposal = graph.CreateState(); 
+            _s2_disposal = graph.CreateState();
+            graph.InitialUnit = _s1_disposal;
+
+            // Setup: Only an event-driven transition
+            (_s1_disposal > _s2_disposal).On<TestEvent>(); 
+
+            _sm_disposal.Start();
+            
+            // Trigger event before dispose
+            EventBus.Raise(new TestEvent());
+            _sm_disposal.UpdateMachine(); 
+            Assert.IsTrue(_s2_disposal.IsActive(), "EventDrivenTransition_BeforeDispose: _s2_disposal should be active after event.");
+
+            // Dispose
+            _sm_disposal.Dispose();
+
+            // Trigger event after dispose - SM should not process it
+            EventBus.Raise(new TestEvent());
+            
+            // Assert that attempts to use the disposed SM throw exceptions
+            Assert.Throws<ObjectDisposedException>(() => {
+                _sm_disposal.UpdateMachine(); 
+            }, "EventDrivenTransition_AfterDispose: UpdateMachine() on disposed SM should throw.");
+            
+            Assert.Throws<ObjectDisposedException>(() => {
+                graph.GetCurrentStateName(); // This graph belongs to the disposed SM
+            }, "EventDrivenTransition_AfterDispose: Accessing graph of disposed SM should throw.");
+            
+            // Optionally, check that a specific listener was not called if we had one, 
+            // but this test focuses on the transition mechanism itself not firing.
+        }
+    }
+} // End of namespace Nopnag.StateMachineLib.Tests

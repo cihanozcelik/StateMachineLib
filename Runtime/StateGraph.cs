@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using Nopnag.StateMachineLib.Transition;
 using Nopnag.StateMachineLib.Util; // Added for marker and configurator types
+using Nopnag.EventBusLib; // Added for IIListener
 // using Nopnag.StateMachine.Runtime; // Removed incorrect using
 // No specific using needed if AnyStateMarker is in Nopnag.StateMachineLib
 
@@ -21,9 +22,11 @@ namespace Nopnag.StateMachineLib
 
     public StateUnit InitialUnit;
     public bool IsGraphActive { get; private set; } // Made setter private
-    StateUnit _currentUnit;
+    public StateUnit CurrentUnit { get; private set; }
     readonly List<StateUnit> _units = new();
     private readonly List<IStateTransition> _anyStateTransitions = new List<IStateTransition>();
+    private List<IIListener> _graphEventTransitionListeners = new List<IIListener>();
+    private bool _isDisposedByParent = false; // New flag
 
     [Obsolete("Use CreateState() instead. If a name is needed, it should be managed by the user externally or via StateUnit properties if available.", false)]
     public StateUnit CreateUnit(string name)
@@ -37,6 +40,7 @@ namespace Nopnag.StateMachineLib
 
     public StateUnit CreateState()
     {
+      if (_isDisposedByParent) throw new ObjectDisposedException(nameof(StateGraph));
       var stateUnit = new StateUnit(this);
       _units.Add(stateUnit);
       if (InitialUnit == null) InitialUnit = stateUnit;
@@ -54,6 +58,12 @@ namespace Nopnag.StateMachineLib
         _anyStateTransitions.Add(transition);
     }
 
+    internal void RegisterEventTransitionListener(IIListener listener)
+    {
+        if (listener == null) throw new ArgumentNullException(nameof(listener));
+        _graphEventTransitionListeners.Add(listener);
+    }
+
     // --- Fluent API for Any State Transitions ---
 
     /// <summary>
@@ -64,6 +74,7 @@ namespace Nopnag.StateMachineLib
     /// <returns>A TransitionConfigurator to define the transition's properties.</returns>
     public TransitionConfigurator FromAny(StateUnit targetState)
     {
+        if (_isDisposedByParent) throw new ObjectDisposedException(nameof(StateGraph));
         if (targetState == null) throw new ArgumentNullException(nameof(targetState));
         if (targetState.BaseGraph != this) throw new ArgumentException("Target state must belong to this graph.", nameof(targetState));
         return new TransitionConfigurator(this, targetState);
@@ -76,45 +87,59 @@ namespace Nopnag.StateMachineLib
     /// <returns>A DynamicTargetTransitionConfigurator to define the transition's properties.</returns>
     public DynamicTargetTransitionConfigurator FromAnyToDynamic()
     {
+        if (_isDisposedByParent) throw new ObjectDisposedException(nameof(StateGraph));
         // The DynamicTarget marker is static and implicitly used by ConditionalTransition
         return new DynamicTargetTransitionConfigurator(this, DynamicTarget);
     }
 
     public void EnterGraph()
     {
+      if (_isDisposedByParent) throw new ObjectDisposedException(nameof(StateGraph));
       IsGraphActive = true;
       StartState(InitialUnit);
     }
 
     public void ExitGraph()
     {
-      _currentUnit?.Exit();
+      CurrentUnit?.Exit();
       IsGraphActive = false;
-      _currentUnit = null; // Clear current unit on exit
+      CurrentUnit = null; // Clear current unit on exit
+
+      // Unsubscribe event-based transition listeners
+      foreach (var listener in _graphEventTransitionListeners)
+      {
+        listener.Unsubscribe();
+      }
+      _graphEventTransitionListeners.Clear();
     }
 
     public void FixedUpdateGraph()
     {
-      _currentUnit?.FixedUpdate();
+      if (_isDisposedByParent) throw new ObjectDisposedException(nameof(StateGraph));
+      CurrentUnit?.FixedUpdate();
     }
 
     public string GetCurrentStateName()
     {
-      return _currentUnit?.Name;
+      if (_isDisposedByParent) throw new ObjectDisposedException(nameof(StateGraph));
+      return CurrentUnit?.Name;
     }
 
     public bool IsUnitActive(StateUnit unit)
     {
-      return IsGraphActive && _currentUnit == unit;
+      if (_isDisposedByParent) throw new ObjectDisposedException(nameof(StateGraph));
+      return IsGraphActive && CurrentUnit == unit;
     }
 
     public void LateUpdateGraph()
     {
-      _currentUnit?.LateUpdate();
+      if (_isDisposedByParent) throw new ObjectDisposedException(nameof(StateGraph));
+      CurrentUnit?.LateUpdate();
     }
 
     public void StartState(StateUnit unit)
     {
+      if (_isDisposedByParent) throw new ObjectDisposedException(nameof(StateGraph));
       if (unit == null)
       {
           UnityEngine.Debug.LogWarning("Attempted to start a null state.");
@@ -129,28 +154,29 @@ namespace Nopnag.StateMachineLib
           // However, a state should know its graph.
       }
 
-      _currentUnit?.Exit();
-      _currentUnit = unit;
-      _currentUnit.Start();
+      CurrentUnit?.Exit();
+      CurrentUnit = unit;
+      CurrentUnit.Start();
     }
 
     public void UpdateGraph()
     {
-        if (!IsGraphActive || _currentUnit == null) return;
+        if (_isDisposedByParent) throw new ObjectDisposedException(nameof(StateGraph));
+        if (!IsGraphActive || CurrentUnit == null) return;
 
         int safetyBreak = 0;
         bool stateChangedInCycle;
 
         do
         {
-            if (_currentUnit == null || safetyBreak++ >= MAX_STATE_CHANGES_PER_UPDATE)
+            if (CurrentUnit == null || safetyBreak++ >= MAX_STATE_CHANGES_PER_UPDATE)
             {
                 if (safetyBreak >= MAX_STATE_CHANGES_PER_UPDATE) UnityEngine.Debug.LogWarning("StateGraph: Exceeded max state changes per update cycle. Breaking loop.");
                 break;
             }
 
             stateChangedInCycle = false;
-            float deltaTimeInCurrentState = _currentUnit.DeltaTimeSinceStart;
+            float deltaTimeInCurrentState = CurrentUnit.DeltaTimeSinceStart;
             StateUnit targetStateFromTransition = null;
 
             // 1. Check Any-State Transitions
@@ -170,18 +196,18 @@ namespace Nopnag.StateMachineLib
 
                     if (actualTarget == null)
                     {
-                         UnityEngine.Debug.LogError($"Any-state transition ({transition.GetType().Name}, to '{transition.TargetUnitName}') fired but resolved target is null. Current state: '{_currentUnit.Name}'. Skipping this transition.");
+                         UnityEngine.Debug.LogError($"Any-state transition ({transition.GetType().Name}, to '{transition.TargetUnitName}') fired but resolved target is null. Current state: '{CurrentUnit.Name}'. Skipping this transition.");
                          continue;
                     }
                     
                     // Avoid immediate self-loop from Any to current for DirectTransition to prevent infinite state re-entry in one frame if not careful
-                    if (transition is DirectTransition && actualTarget == _currentUnit)
+                    if (transition is DirectTransition && actualTarget == CurrentUnit)
                     {
                         continue; 
                     }
                     
-                    // UnityEngine.Debug.Log($"Any-State Transition from {_currentUnit.Name} to {actualTarget.Name}");
-                    StartState(actualTarget); // This calls Exit on old _currentUnit, sets new _currentUnit, calls Start on new _currentUnit
+                    // UnityEngine.Debug.Log($"Any-State Transition from {CurrentUnit.Name} to {actualTarget.Name}");
+                    StartState(actualTarget); // This calls Exit on old CurrentUnit, sets new CurrentUnit, calls Start on new CurrentUnit
                     stateChangedInCycle = true;
                     break; 
                 }
@@ -195,15 +221,15 @@ namespace Nopnag.StateMachineLib
             // 2. If no any-state transition occurred, let the current unit process its update and local transitions.
             // StateUnit.Update() returns false if a local transition occurred (state changed), true otherwise.
             // The existing `StateUnit.Update()` calls `CheckTransitions()` which calls `BaseGraph.StartState()`.
-            if (_currentUnit.Update()) // True if NO local transition occurred
+            if (CurrentUnit.Update()) // True if NO local transition occurred
             {
                 // No local transition, and no any-state transition in this iteration.
-                // The update cycle for this _currentUnit for this specific UpdateGraph() call is done.
+                // The update cycle for this CurrentUnit for this specific UpdateGraph() call is done.
                 break; // Exit the do-while loop.
             }
             else
             {
-                // A local transition occurred within _currentUnit.Update(). _currentUnit has changed.
+                // A local transition occurred within CurrentUnit.Update(). CurrentUnit has changed.
                 stateChangedInCycle = true; // Ensure the loop continues to process the new state.
             }
 
@@ -218,5 +244,13 @@ namespace Nopnag.StateMachineLib
     //     StartState(transitionedUnit);
     //   }
     // }
+
+    internal void MarkAsDisposed() // New method to be called by StateMachine
+    {
+        _isDisposedByParent = true;
+        // Optionally, also ensure IsGraphActive is false and CurrentUnit is null if not already handled by ExitGraph
+        IsGraphActive = false;
+        CurrentUnit = null;
+    }
   }
 }
