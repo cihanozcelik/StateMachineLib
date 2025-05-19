@@ -409,8 +409,6 @@ namespace Nopnag.StateMachineLib
       for (var i = 0; i < Transitions.Count; i++)
         if (Transitions[i].CheckTransition(DeltaTimeSinceStart, out targetState))
         {
-          if (ExitStateFunction != null) ExitStateFunction();
-
           BaseGraph.StartState(targetState);
           return true;
         }
