@@ -11,28 +11,28 @@ namespace Nopnag.StateMachineLib
   {
     struct PeriodicCallback
     {
-      public float IntervalTime;
+      public float  IntervalTime;
       public Action Callback;
-      public float NextInvocationTime;
+      public float  NextInvocationTime;
 
       public PeriodicCallback(float intervalTime, Action callback)
       {
-        IntervalTime = intervalTime;
-        Callback = callback;
+        IntervalTime       = intervalTime;
+        Callback           = callback;
         NextInvocationTime = intervalTime;
       }
     }
 
     struct ScheduledCallback
     {
-      public float TargetTime;
+      public float  TargetTime;
       public Action Callback;
-      public bool HasBeenInvoked;
+      public bool   HasBeenInvoked;
 
       public ScheduledCallback(float targetTime, Action callback)
       {
-        TargetTime = targetTime;
-        Callback = callback;
+        TargetTime     = targetTime;
+        Callback       = callback;
         HasBeenInvoked = false;
       }
     }
@@ -51,7 +51,7 @@ namespace Nopnag.StateMachineLib
     [Obsolete("Use OnLateUpdate instead.", false)]
     public Action<float> LateUpdateStateFunction;
 
-    public readonly string Name;
+    public readonly string                 Name;
     public readonly List<IStateTransition> Transitions = new();
 
     [Obsolete("Use OnUpdateBeforeTransitionCheck instead.", false)]
@@ -60,15 +60,15 @@ namespace Nopnag.StateMachineLib
     [Obsolete("Use OnUpdate instead.", false)]
     public Action<float> UpdateStateFunction;
     readonly List<PeriodicCallback> _periodicCallbacks = new();
-    float _previousTime;
+    float                           _previousTime;
 
-    readonly List<ScheduledCallback> _scheduledCallbacks = new();
-    List<IIListener> _stateUnitEventBusListeners = new();
-    StateGraph _subGraph;
+    readonly List<ScheduledCallback> _scheduledCallbacks         = new();
+    List<IIListener>                 _stateUnitEventBusListeners = new();
+    StateGraph                       _subGraph;
 
     public StateUnit(string name, StateGraph graph)
     {
-      Name = name;
+      Name      = name;
       BaseGraph = graph;
     }
 
@@ -230,7 +230,7 @@ namespace Nopnag.StateMachineLib
     /// Example: <code>(stateA > new[] { stateB, stateC }).When(...);</code>
     /// </summary>
     public static MultiTargetTransitionConfigurator operator >(
-      StateUnit fromState,
+      StateUnit   fromState,
       StateUnit[] toStates
     )
     {
@@ -242,7 +242,7 @@ namespace Nopnag.StateMachineLib
     /// Example: <code>(stateA > StateGraph.DynamicTarget).When(...);</code>
     /// </summary>
     public static DynamicTargetTransitionConfigurator operator >(
-      StateUnit fromState,
+      StateUnit           fromState,
       DynamicTargetMarker dynamicTargetMarker
     )
     {
@@ -279,7 +279,7 @@ namespace Nopnag.StateMachineLib
     /// This syntax (sourceState < targetStatesArray) is not supported for fluent transitions.
     /// </summary>
     public static MultiTargetTransitionConfigurator operator <(
-      StateUnit fromState,
+      StateUnit   fromState,
       StateUnit[] toStates
     )
     {
@@ -292,7 +292,7 @@ namespace Nopnag.StateMachineLib
     /// This syntax (sourceState < dynamicTargetMarker) is not supported for fluent transitions.
     /// </summary>
     public static DynamicTargetTransitionConfigurator operator <(
-      StateUnit fromState,
+      StateUnit           fromState,
       DynamicTargetMarker dynamicTargetMarker
     )
     {
@@ -317,7 +317,7 @@ namespace Nopnag.StateMachineLib
 
     internal void Start()
     {
-      _previousTime = Time.time;
+      _previousTime       = Time.time;
       DeltaTimeSinceStart = 0;
       EnterStateFunction?.Invoke();
       _subGraph?.EnterGraph();
@@ -325,7 +325,7 @@ namespace Nopnag.StateMachineLib
       for (var i = 0; i < _scheduledCallbacks.Count; i++)
       {
         var sc = _scheduledCallbacks[i];
-        sc.HasBeenInvoked = false;
+        sc.HasBeenInvoked      = false;
         _scheduledCallbacks[i] = sc;
       }
 
@@ -344,7 +344,7 @@ namespace Nopnag.StateMachineLib
     internal bool Update()
     {
       DeltaTimeSinceStart += (Time.time - _previousTime) * 1; // timescale here
-      _previousTime = Time.time;
+      _previousTime       =  Time.time;
       UpdateStateBeforeTransitionCheckFunction?.Invoke(DeltaTimeSinceStart);
 
       CheckScheduledCallbacks();
@@ -373,14 +373,14 @@ namespace Nopnag.StateMachineLib
     {
       for (var i = 0; i < _periodicCallbacks.Count; i++)
       {
-        var pc = _periodicCallbacks[i]; // Get a copy of the struct
+        var pc            = _periodicCallbacks[i]; // Get a copy of the struct
         var invokedInLoop = false;
 
         while (DeltaTimeSinceStart >= pc.NextInvocationTime && pc.IntervalTime > 0)
         {
           pc.Callback?.Invoke();
           pc.NextInvocationTime += pc.IntervalTime;
-          invokedInLoop = true;
+          invokedInLoop         =  true;
         }
 
         if (invokedInLoop) _periodicCallbacks[i] = pc; // Assign the modified copy back
@@ -397,7 +397,7 @@ namespace Nopnag.StateMachineLib
         {
           scheduledCallback.Callback?.Invoke();
           scheduledCallback.HasBeenInvoked = true;
-          _scheduledCallbacks[i] = scheduledCallback; // Assign the modified copy back
+          _scheduledCallbacks[i]           = scheduledCallback; // Assign the modified copy back
         }
       }
     }
@@ -420,7 +420,10 @@ namespace Nopnag.StateMachineLib
     {
       _subGraph?.ExitGraph();
       ExitStateFunction?.Invoke();
+    }
 
+    internal void ClearSubscriptions()
+    {
       // Unsubscribe EventBus listeners
       foreach (var listener in _stateUnitEventBusListeners) listener.Unsubscribe();
       _stateUnitEventBusListeners.Clear();
