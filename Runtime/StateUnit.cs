@@ -4,26 +4,11 @@ using Nopnag.EventBusLib;
 using Nopnag.StateMachineLib.Transition;
 using Nopnag.StateMachineLib.Util;
 using UnityEngine;
-using System.Linq;
 
 namespace Nopnag.StateMachineLib
 {
   public class StateUnit
   {
-    struct ScheduledCallback
-    {
-      public float TargetTime;
-      public Action Callback;
-      public bool HasBeenInvoked;
-
-      public ScheduledCallback(float targetTime, Action callback)
-      {
-        TargetTime = targetTime;
-        Callback = callback;
-        HasBeenInvoked = false;
-      }
-    }
-
     struct PeriodicCallback
     {
       public float IntervalTime;
@@ -38,77 +23,91 @@ namespace Nopnag.StateMachineLib
       }
     }
 
+    struct ScheduledCallback
+    {
+      public float TargetTime;
+      public Action Callback;
+      public bool HasBeenInvoked;
+
+      public ScheduledCallback(float targetTime, Action callback)
+      {
+        TargetTime = targetTime;
+        Callback = callback;
+        HasBeenInvoked = false;
+      }
+    }
+
     public readonly StateGraph BaseGraph;
 
     [Obsolete("Use OnEnter instead.", false)]
     public Action EnterStateFunction;
-    public Action OnEnter
-    {
-      get => EnterStateFunction;
-      set => EnterStateFunction = value;
-    }
 
     [Obsolete("Use OnExit instead.", false)]
     public Action ExitStateFunction;
-    public Action OnExit
-    {
-      get => ExitStateFunction;
-      set => ExitStateFunction = value;
-    }
 
     [Obsolete("Use OnFixedUpdate instead.", false)]
     public Action<float> FixedUpdateStateFunction;
-    public Action<float> OnFixedUpdate
-    {
-      get => FixedUpdateStateFunction;
-      set => FixedUpdateStateFunction = value;
-    }
 
     [Obsolete("Use OnLateUpdate instead.", false)]
     public Action<float> LateUpdateStateFunction;
-    public Action<float> OnLateUpdate
-    {
-      get => LateUpdateStateFunction;
-      set => LateUpdateStateFunction = value;
-    }
 
     public readonly string Name;
     public readonly List<IStateTransition> Transitions = new();
 
     [Obsolete("Use OnUpdateBeforeTransitionCheck instead.", false)]
     public Action<float> UpdateStateBeforeTransitionCheckFunction;
-    public Action<float> OnUpdateBeforeTransitionCheck
-    {
-      get => UpdateStateBeforeTransitionCheckFunction;
-      set => UpdateStateBeforeTransitionCheckFunction = value;
-    }
 
     [Obsolete("Use OnUpdate instead.", false)]
     public Action<float> UpdateStateFunction;
-    public Action<float> OnUpdate
-    {
-      get => UpdateStateFunction;
-      set => UpdateStateFunction = value;
-    }
-
-    readonly List<ScheduledCallback> _scheduledCallbacks = new();
     readonly List<PeriodicCallback> _periodicCallbacks = new();
     float _previousTime;
+
+    readonly List<ScheduledCallback> _scheduledCallbacks = new();
+    List<IIListener> _stateUnitEventBusListeners = new();
     StateGraph _subGraph;
-    private List<IIListener> _stateUnitEventBusListeners = new List<IIListener>();
 
     public StateUnit(string name, StateGraph graph)
     {
       Name = name;
       BaseGraph = graph;
     }
-    
+
     public StateUnit(StateGraph graph)
     {
       BaseGraph = graph;
     }
 
     public float DeltaTimeSinceStart { get; private set; }
+    public Action OnEnter
+    {
+      get => EnterStateFunction;
+      set => EnterStateFunction = value;
+    }
+    public Action OnExit
+    {
+      get => ExitStateFunction;
+      set => ExitStateFunction = value;
+    }
+    public Action<float> OnFixedUpdate
+    {
+      get => FixedUpdateStateFunction;
+      set => FixedUpdateStateFunction = value;
+    }
+    public Action<float> OnLateUpdate
+    {
+      get => LateUpdateStateFunction;
+      set => LateUpdateStateFunction = value;
+    }
+    public Action<float> OnUpdate
+    {
+      get => UpdateStateFunction;
+      set => UpdateStateFunction = value;
+    }
+    public Action<float> OnUpdateBeforeTransitionCheck
+    {
+      get => UpdateStateBeforeTransitionCheckFunction;
+      set => UpdateStateBeforeTransitionCheckFunction = value;
+    }
 
     public void At(float targetTime, Action callback)
     {
@@ -122,42 +121,8 @@ namespace Nopnag.StateMachineLib
         Debug.LogWarning("StateUnit.AtEvery: intervalTime must be positive.");
         return;
       }
+
       _periodicCallbacks.Add(new PeriodicCallback(intervalTime, callback));
-    }
-
-    internal bool CheckTransitions()
-    {
-      // Debug.Log("Check transitions");
-      StateUnit targetState;
-      for (var i = 0; i < Transitions.Count; i++)
-        if (Transitions[i].CheckTransition(DeltaTimeSinceStart, out targetState))
-        {
-          if (ExitStateFunction != null) ExitStateFunction();
-
-          BaseGraph.StartState(targetState);
-          return true;
-        }
-
-      return false;
-    }
-
-    internal void Exit()
-    {
-      _subGraph?.ExitGraph();
-      ExitStateFunction?.Invoke();
-
-      // Unsubscribe EventBus listeners
-      foreach (var listener in _stateUnitEventBusListeners)
-      {
-        listener.Unsubscribe();
-      }
-      _stateUnitEventBusListeners.Clear();
-    }
-
-    internal void FixedUpdate()
-    {
-      FixedUpdateStateFunction?.Invoke(DeltaTimeSinceStart);
-      _subGraph?.FixedUpdateGraph();
     }
 
     public StateGraph GetSubStateGraph()
@@ -172,12 +137,6 @@ namespace Nopnag.StateMachineLib
       return BaseGraph != null && BaseGraph.IsGraphActive && BaseGraph.CurrentUnit == this;
     }
 
-    internal void LateUpdate()
-    {
-      LateUpdateStateFunction?.Invoke(DeltaTimeSinceStart);
-      _subGraph?.LateUpdateGraph();
-    }
-
     /// <summary>
     /// Subscribes to events of type T from the EventBus, but only invokes the listener while this state is active.
     /// </summary>
@@ -186,13 +145,40 @@ namespace Nopnag.StateMachineLib
     [Obsolete("Use On<T>(listener) instead.", false)]
     public void Listen<T>(ListenerDelegate<T> listener) where T : BusEvent
     {
-      IIListener handle = EventBus<T>.Listen(
+      var handle = EventBus<T>.Listen(
         @event =>
         {
           if (IsActive()) listener.Invoke(@event);
         }
       );
       _stateUnitEventBusListeners.Add(handle);
+    }
+
+    /// <summary>
+    /// Subscribes to filtered events (via EventQuery) of type T from the EventBus, but only invokes the listener while this state is active.
+    /// </summary>
+    /// <typeparam name="T">The event type to listen for.</typeparam>
+    /// <param name="query">The EventQuery to filter which events to listen for.</param>
+    /// <param name="listener">The callback to invoke when the filtered event is raised and this state is active.</param>
+    [Obsolete("Use On<T>(query, listener) instead.", false)]
+    public void Listen<T>(EventQuery<T> query, ListenerDelegate<T> listener) where T : BusEvent
+    {
+      var handle = query.Listen(
+        @event =>
+        {
+          if (IsActive()) listener.Invoke(@event);
+        }
+      );
+      _stateUnitEventBusListeners.Add(handle);
+    }
+
+    [Obsolete("Use On<T>() instead.", false)]
+    public void ListenSignal<T>(ref Action<T> signal, Action<T> sensor)
+    {
+      signal += parameter =>
+      {
+        if (IsActive()) sensor(parameter);
+      };
     }
 
     /// <summary>
@@ -206,24 +192,6 @@ namespace Nopnag.StateMachineLib
     }
 
     /// <summary>
-    /// Subscribes to filtered events (via EventQuery) of type T from the EventBus, but only invokes the listener while this state is active.
-    /// </summary>
-    /// <typeparam name="T">The event type to listen for.</typeparam>
-    /// <param name="query">The EventQuery to filter which events to listen for.</param>
-    /// <param name="listener">The callback to invoke when the filtered event is raised and this state is active.</param>
-    [Obsolete("Use On<T>(query, listener) instead.", false)]
-    public void Listen<T>(EventQuery<T> query, ListenerDelegate<T> listener) where T : BusEvent
-    {
-      IIListener handle = query.Listen(
-        @event =>
-        {
-          if (IsActive()) listener.Invoke(@event);
-        }
-      );
-      _stateUnitEventBusListeners.Add(handle);
-    }
-
-    /// <summary>
     /// A synonym for Listen. Subscribes to filtered events (via EventQuery) of type T from the EventBus, but only invokes the listener while this state is active.
     /// </summary>
     /// <typeparam name="T">The event type to listen for.</typeparam>
@@ -231,16 +199,7 @@ namespace Nopnag.StateMachineLib
     /// <param name="listener">The callback to invoke when the filtered event is raised and this state is active.</param>
     public void On<T>(EventQuery<T> query, ListenerDelegate<T> listener) where T : BusEvent
     {
-        Listen(query, listener);
-    }
-
-    [Obsolete("Use On<T>() instead.", false)]
-    public void ListenSignal<T>(ref Action<T> signal, Action<T> sensor)
-    {
-      signal += parameter =>
-      {
-        if (IsActive()) sensor(parameter);
-      };
+      Listen(query, listener);
     }
 
     /// <summary>
@@ -255,6 +214,102 @@ namespace Nopnag.StateMachineLib
       ListenSignal(ref signal, sensor);
     }
 
+    // --- Operator Overloads for Fluent API ---
+
+    /// <summary>
+    /// Initiates a fluent transition definition from a source state to a target state.
+    /// Example: <code>(stateA > stateB).When(...);</code>
+    /// </summary>
+    public static TransitionConfigurator operator >(StateUnit fromState, StateUnit toState)
+    {
+      return new TransitionConfigurator(fromState, toState);
+    }
+
+    /// <summary>
+    /// Initiates a fluent transition definition from a source state to one of several target states (indexed).
+    /// Example: <code>(stateA > new[] { stateB, stateC }).When(...);</code>
+    /// </summary>
+    public static MultiTargetTransitionConfigurator operator >(
+      StateUnit fromState,
+      StateUnit[] toStates
+    )
+    {
+      return new MultiTargetTransitionConfigurator(fromState, toStates);
+    }
+
+    /// <summary>
+    /// Initiates a fluent transition definition from a source state to a dynamically resolved target state.
+    /// Example: <code>(stateA > StateGraph.DynamicTarget).When(...);</code>
+    /// </summary>
+    public static DynamicTargetTransitionConfigurator operator >(
+      StateUnit fromState,
+      DynamicTargetMarker dynamicTargetMarker
+    )
+    {
+      return new DynamicTargetTransitionConfigurator(fromState);
+    }
+
+    /// <summary>
+    /// Initiates a fluent transition definition from any state within the targetUnit's graph to the targetUnit.
+    /// This is syntactic sugar for <code>targetUnit.BaseGraph.FromAny(targetUnit)</code>.
+    /// Example: <code>(StateGraph.Any > stateB).When(...);</code>
+    /// </summary>
+    public static TransitionConfigurator operator >(AnyStateMarker anyMarker, StateUnit targetUnit)
+    {
+      if (targetUnit == null) throw new ArgumentNullException(nameof(targetUnit));
+      if (targetUnit.BaseGraph == null)
+        throw new InvalidOperationException(
+          "Target state must be associated with a graph to create an AnyState transition using StateGraph.Any syntax.");
+      return targetUnit.BaseGraph.FromAny(targetUnit);
+    }
+
+    /// <summary>
+    /// Initiates a fluent transition definition from a source state to a target state (reversed operands).
+    /// Satisfies CS0216 (operator < requires matching operator >).
+    /// Conceptually, <code>(targetState < fromState)</code> is equivalent to <code>(fromState > targetState)</code>.
+    /// </summary>
+    public static TransitionConfigurator operator <(StateUnit toState, StateUnit fromState)
+    {
+      // We ensure that FromState is always the left operand of > or right operand of < conceptually
+      return new TransitionConfigurator(fromState, toState);
+    }
+
+    /// <summary>
+    /// Matching operator for <code>StateUnit > StateUnit[]</code> to satisfy CS0216.
+    /// This syntax (sourceState < targetStatesArray) is not supported for fluent transitions.
+    /// </summary>
+    public static MultiTargetTransitionConfigurator operator <(
+      StateUnit fromState,
+      StateUnit[] toStates
+    )
+    {
+      throw new NotSupportedException(
+        "The syntax 'StateUnit < StateUnit[]' is not supported for defining multi-target transitions. Use 'StateUnit > StateUnit[]'.");
+    }
+
+    /// <summary>
+    /// Matching operator for <code>StateUnit > DynamicTargetMarker</code> to satisfy CS0216.
+    /// This syntax (sourceState < dynamicTargetMarker) is not supported for fluent transitions.
+    /// </summary>
+    public static DynamicTargetTransitionConfigurator operator <(
+      StateUnit fromState,
+      DynamicTargetMarker dynamicTargetMarker
+    )
+    {
+      throw new NotSupportedException(
+        "The syntax 'StateUnit < DynamicTargetMarker' is not supported. Use 'StateUnit > StateGraph.DynamicTarget'.");
+    }
+
+    /// <summary>
+    /// Matching operator for <code>AnyStateMarker > StateUnit</code> to satisfy C# operator pairing rules (CS0216).
+    /// This syntax (AnyStateMarker < StateUnit) is not supported for defining transitions.
+    /// </summary>
+    public static TransitionConfigurator operator <(AnyStateMarker anyMarker, StateUnit targetUnit)
+    {
+      throw new NotSupportedException(
+        "The '<' operator is not supported for AnyState transitions. Use '(StateGraph.Any > yourStateUnit)' to define transitions.");
+    }
+
     public void SetSubStateGraph(StateGraph subGraph)
     {
       _subGraph = subGraph;
@@ -267,14 +322,14 @@ namespace Nopnag.StateMachineLib
       EnterStateFunction?.Invoke();
       _subGraph?.EnterGraph();
 
-      for (int i = 0; i < _scheduledCallbacks.Count; i++)
+      for (var i = 0; i < _scheduledCallbacks.Count; i++)
       {
         var sc = _scheduledCallbacks[i];
         sc.HasBeenInvoked = false;
         _scheduledCallbacks[i] = sc;
       }
 
-      for (int i = 0; i < _periodicCallbacks.Count; i++)
+      for (var i = 0; i < _periodicCallbacks.Count; i++)
       {
         var pc = _periodicCallbacks[i];
         pc.NextInvocationTime = pc.IntervalTime;
@@ -301,27 +356,25 @@ namespace Nopnag.StateMachineLib
       _subGraph?.UpdateGraph();
       return true;
     }
-    
-    void CheckScheduledCallbacks()
+
+    internal void FixedUpdate()
     {
-      for (int i = 0; i < _scheduledCallbacks.Count; i++)
-      {
-        var scheduledCallback = _scheduledCallbacks[i]; // Get a copy of the struct
-        if (!scheduledCallback.HasBeenInvoked && DeltaTimeSinceStart >= scheduledCallback.TargetTime)
-        {
-          scheduledCallback.Callback?.Invoke();
-          scheduledCallback.HasBeenInvoked = true;
-          _scheduledCallbacks[i] = scheduledCallback; // Assign the modified copy back
-        }
-      }
+      FixedUpdateStateFunction?.Invoke(DeltaTimeSinceStart);
+      _subGraph?.FixedUpdateGraph();
+    }
+
+    internal void LateUpdate()
+    {
+      LateUpdateStateFunction?.Invoke(DeltaTimeSinceStart);
+      _subGraph?.LateUpdateGraph();
     }
 
     void CheckPeriodicCallbacks()
     {
-      for (int i = 0; i < _periodicCallbacks.Count; i++)
+      for (var i = 0; i < _periodicCallbacks.Count; i++)
       {
         var pc = _periodicCallbacks[i]; // Get a copy of the struct
-        bool invokedInLoop = false;
+        var invokedInLoop = false;
 
         while (DeltaTimeSinceStart >= pc.NextInvocationTime && pc.IntervalTime > 0)
         {
@@ -330,91 +383,49 @@ namespace Nopnag.StateMachineLib
           invokedInLoop = true;
         }
 
-        if (invokedInLoop)
+        if (invokedInLoop) _periodicCallbacks[i] = pc; // Assign the modified copy back
+      }
+    }
+
+    void CheckScheduledCallbacks()
+    {
+      for (var i = 0; i < _scheduledCallbacks.Count; i++)
+      {
+        var scheduledCallback = _scheduledCallbacks[i]; // Get a copy of the struct
+        if (!scheduledCallback.HasBeenInvoked &&
+            DeltaTimeSinceStart >= scheduledCallback.TargetTime)
         {
-          _periodicCallbacks[i] = pc; // Assign the modified copy back
+          scheduledCallback.Callback?.Invoke();
+          scheduledCallback.HasBeenInvoked = true;
+          _scheduledCallbacks[i] = scheduledCallback; // Assign the modified copy back
         }
       }
     }
 
-    // --- Operator Overloads for Fluent API ---
-
-    /// <summary>
-    /// Initiates a fluent transition definition from a source state to a target state.
-    /// Example: <code>(stateA > stateB).When(...);</code>
-    /// </summary>
-    public static TransitionConfigurator operator >(StateUnit fromState, StateUnit toState)
+    internal bool CheckTransitions()
     {
-      return new TransitionConfigurator(fromState, toState);
+      // Debug.Log("Check transitions");
+      StateUnit targetState;
+      for (var i = 0; i < Transitions.Count; i++)
+        if (Transitions[i].CheckTransition(DeltaTimeSinceStart, out targetState))
+        {
+          if (ExitStateFunction != null) ExitStateFunction();
+
+          BaseGraph.StartState(targetState);
+          return true;
+        }
+
+      return false;
     }
 
-    /// <summary>
-    /// Initiates a fluent transition definition from a source state to a target state (reversed operands).
-    /// Satisfies CS0216 (operator < requires matching operator >).
-    /// Conceptually, <code>(targetState < fromState)</code> is equivalent to <code>(fromState > targetState)</code>.
-    /// </summary>
-    public static TransitionConfigurator operator <(StateUnit toState, StateUnit fromState)
+    internal void Exit()
     {
-      // We ensure that FromState is always the left operand of > or right operand of < conceptually
-      return new TransitionConfigurator(fromState, toState);
-    }
+      _subGraph?.ExitGraph();
+      ExitStateFunction?.Invoke();
 
-    /// <summary>
-    /// Initiates a fluent transition definition from a source state to one of several target states (indexed).
-    /// Example: <code>(stateA > new[] { stateB, stateC }).When(...);</code>
-    /// </summary>
-    public static MultiTargetTransitionConfigurator operator >(StateUnit fromState, StateUnit[] toStates)
-    {
-        return new MultiTargetTransitionConfigurator(fromState, toStates);
-    }
-
-    /// <summary>
-    /// Matching operator for <code>StateUnit > StateUnit[]</code> to satisfy CS0216.
-    /// This syntax (sourceState < targetStatesArray) is not supported for fluent transitions.
-    /// </summary>
-    public static MultiTargetTransitionConfigurator operator <(StateUnit fromState, StateUnit[] toStates)
-    {
-        throw new NotSupportedException("The syntax 'StateUnit < StateUnit[]' is not supported for defining multi-target transitions. Use 'StateUnit > StateUnit[]'.");
-    }
-
-    /// <summary>
-    /// Initiates a fluent transition definition from a source state to a dynamically resolved target state.
-    /// Example: <code>(stateA > StateGraph.DynamicTarget).When(...);</code>
-    /// </summary>
-    public static DynamicTargetTransitionConfigurator operator >(StateUnit fromState, DynamicTargetMarker dynamicTargetMarker)
-    {
-        return new DynamicTargetTransitionConfigurator(fromState);
-    }
-
-    /// <summary>
-    /// Matching operator for <code>StateUnit > DynamicTargetMarker</code> to satisfy CS0216.
-    /// This syntax (sourceState < dynamicTargetMarker) is not supported for fluent transitions.
-    /// </summary>
-    public static DynamicTargetTransitionConfigurator operator <(StateUnit fromState, DynamicTargetMarker dynamicTargetMarker)
-    {
-        throw new NotSupportedException("The syntax 'StateUnit < DynamicTargetMarker' is not supported. Use 'StateUnit > StateGraph.DynamicTarget'.");
-    }
-    
-    /// <summary>
-    /// Initiates a fluent transition definition from any state within the targetUnit's graph to the targetUnit.
-    /// This is syntactic sugar for <code>targetUnit.BaseGraph.FromAny(targetUnit)</code>.
-    /// Example: <code>(StateGraph.Any > stateB).When(...);</code>
-    /// </summary>
-    public static TransitionConfigurator operator >(AnyStateMarker anyMarker, StateUnit targetUnit)
-    {
-        if (targetUnit == null) throw new ArgumentNullException(nameof(targetUnit));
-        if (targetUnit.BaseGraph == null) 
-            throw new InvalidOperationException("Target state must be associated with a graph to create an AnyState transition using StateGraph.Any syntax.");
-        return targetUnit.BaseGraph.FromAny(targetUnit);
-    }
-
-    /// <summary>
-    /// Matching operator for <code>AnyStateMarker > StateUnit</code> to satisfy C# operator pairing rules (CS0216).
-    /// This syntax (AnyStateMarker < StateUnit) is not supported for defining transitions.
-    /// </summary>
-    public static TransitionConfigurator operator <(AnyStateMarker anyMarker, StateUnit targetUnit)
-    {
-        throw new NotSupportedException("The '<' operator is not supported for AnyState transitions. Use '(StateGraph.Any > yourStateUnit)' to define transitions.");
+      // Unsubscribe EventBus listeners
+      foreach (var listener in _stateUnitEventBusListeners) listener.Unsubscribe();
+      _stateUnitEventBusListeners.Clear();
     }
   }
 }
