@@ -37,12 +37,8 @@ state1.AtEvery(1.0f, () => { /* Action every 1 second in state1 */ });
 // Assumes: using Nopnag.EventBusLib;
 // public class MyGameEvent : BusEvent { public int Value; }
 // public class MyParam : IParameter {}
-// public Action MySignalAction;
-// public Action<int> MySignalActionWithParam;
 state1.On<MyGameEvent>(evt => { /* Handle MyGameEvent, e.g., Debug.Log(evt.Value) */ });
 state1.On<MyGameEvent>(EventBus<MyGameEvent>.Where<MyParam>("filterKey"), evt => { /* Handle filtered MyGameEvent */ });
-state1.On(ref MySignalAction, () => { /* Handle MySignalAction when invoked */ });
-state1.On(ref MySignalActionWithParam, (paramValue) => { /* Handle MySignalActionWithParam(paramValue) */ });
 
 // --- Subgraphs / Hierarchical States ---
 StateUnit parentState = mainGraph.CreateState();
@@ -52,7 +48,7 @@ StateUnit childState1 = subGraph.CreateState();
 subGraph.InitialUnit = childState1; // Set initial state for the subgraph
 
 // --- Fluent Transition Creation API ---
-// Assumes: StateUnit state1, state2, state3; MyGameEvent, MyParam, MyFluentSignal etc. defined.
+// Assumes: StateUnit state1, state2, state3; MyGameEvent, MyParam etc. defined.
 // 1. Transition by Condition or Time
 (state1 > state2).When(elapsedTime => elapsedTime > 2.0f && SomeGlobalCondition());
 (state2 < state1).When(elapsedTime => elapsedTime > 2.0f); // (target < source) is equivalent
@@ -64,26 +60,20 @@ subGraph.InitialUnit = childState1; // Set initial state for the subgraph
 (state1 > state2).On(EventBus<MyGameEvent>.Where<MyParam>("filterKey")); // With query
 (state1 > state2).On(EventBus<MyGameEvent>.Where<MyParam>("filterKey"), evt => evt.Value > 5); // Query + predicate
 
-// 3. Transition by Action
-// public Action MyFluentSignal;
-(state1 > state2).On(ref MyFluentSignal);
-// public Action<int> MySignalActionWithParam; // Corrected based on previous diff observation
-// (state1 > state2).On(ref MySignalActionWithParam); // With parameter 
+// 3. Immediate Transition
+(state1 > state2).Immediately(); // Unconditional immediate transition
 
-// 4. Direct Transition
-(state1 > state2).Immediately();
-
-// 5. Transition to Indexed Target (from State to Array of States)
+// 4. Transition to Indexed Target (from State to Array of States)
 (state1 > new[] { state2, state3 }).When(
     elapsedTime => elapsedTime < 2.0f ? 0 : (elapsedTime < 5.0f ? 1 : -1) 
     ); // Ex: to state2 if <2s, to state3 if <5s (-1 means no change)
 
-// 6. Transition to Dynamically Selected Target (from State to Dynamic Target Marker)
+// 5. Transition to Dynamically Selected Target (from State to Dynamic Target Marker)
 (state1 > StateGraph.DynamicTarget).When(
     elapsedTime => elapsedTime > 4.0f ? state2 : (elapsedTime > 1.0f ? state3 : null) 
     ); // Ex: to state2 if >4s, to state3 if >1s, else no change
 
-// 7. Transitions from "Any State"
+// 6. Transitions from "Any State"
 // These transitions can occur from any active state within the graph.
 // They are evaluated with higher priority than regular state-to-state transitions.
 // Assumes: StateUnit state3; MyGameEvent etc. defined as in previous examples.
@@ -91,7 +81,7 @@ subGraph.InitialUnit = childState1; // Set initial state for the subgraph
 // Define "Any State" transitions using the (StateGraph.Any > targetState) operator syntax:
 (StateGraph.Any > state3).When(elapsedTime => SomeGlobalCondition());
 (StateGraph.Any > state3).On<MyGameEvent>(evt => evt.Value > 10);
-// This syntax supports .When(), .After(), .On<Event>(), .On(ref Action), .Immediately() etc.,
+// This syntax supports .When(), .After(), .On<Event>(), .Immediately() etc.,
 // just like regular state-to-state transitions.
 ```
 
@@ -147,7 +137,7 @@ subGraph.InitialUnit = childState1; // Set initial state for the subgraph
 
 ## Listening to Events & Signals Only While a State is Active
 
-A powerful feature of StateMachineLib is the ability to listen to `EventBusLib` events or standard C# `Action` signals only while a specific state is active. This is achieved using the `StateUnit.On` methods. The older `Listen` and `ListenSignal` methods are now deprecated.
+A powerful feature of StateMachineLib is the ability to listen to `EventBusLib` events only while a specific state is active. This is achieved using the `StateUnit.On` methods. The older `Listen` and `ListenSignal` methods are now deprecated.
 
 ### EventBus Event Listening (Basic Usage)
 ```csharp
@@ -166,22 +156,6 @@ var query = EventBus<MyEvent>.Where<MyParam>(myValue);
 myState.On(query, evt => { // Preferred
     Debug.Log($"MyEvent with param received in state: {myState.Name}");
 });
-```
-
-### C# Action Signal Listening
-You can also listen to a standard C# `Action<T>` signal. The provided sensor action will only execute if the state is active when the signal is invoked.
-```csharp
-public Action<float> PlayerScoreChanged;
-
-// In state setup:
-// myState.ListenSignal(ref PlayerScoreChanged, ...); // Deprecated
-myState.On(ref PlayerScoreChanged, score => { // Preferred
-    Debug.Log($"Player score changed to {score} while state {myState.Name} is active.");
-    // Perform actions specific to this state based on the score change
-});
-
-// Elsewhere in your code, when the score changes:
-PlayerScoreChanged?.Invoke(newScore);
 ```
 
 **Why is this important?**

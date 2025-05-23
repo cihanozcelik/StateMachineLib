@@ -137,41 +137,6 @@ namespace Nopnag.StateMachineLib.Util
         }
 
         /// <summary>
-        /// Creates a TransitionByAction that occurs when the specified signal Action is invoked.
-        /// </summary>
-        /// <typeparam name="TActionParam">The type of the parameter for the signal Action.</typeparam>
-        /// <param name="signal">The signal Action to listen to (passed by reference).</param>
-        public void On<TActionParam>(ref Action<TActionParam> signal)
-        {
-            if (ToState == null) { UnityEngine.Debug.LogError(ErrorMessageTargetNull); return; }
-            if (FromState != null)
-            {
-                TransitionByAction.Connect<TActionParam>(FromState, ToState, ref signal);
-            }
-            else
-            {
-                TransitionByAction.Connect<TActionParam>(GraphContext, ToState, ref signal);
-            }
-        }
-        
-        /// <summary>
-        /// Creates a TransitionByAction that occurs when the specified parameterless signal Action is invoked.
-        /// </summary>
-        /// <param name="signal">The parameterless signal Action to listen to (passed by reference).</param>
-        public void On(ref Action signal)
-        {
-            if (ToState == null) { UnityEngine.Debug.LogError(ErrorMessageTargetNull); return; }
-            if (FromState != null)
-            {
-                TransitionByAction.Connect(FromState, ToState, ref signal);
-            }
-            else
-            {
-                TransitionByAction.Connect(GraphContext, ToState, ref signal);
-            }
-        }
-
-        /// <summary>
         /// Creates a DirectTransition that occurs unconditionally and immediately.
         /// </summary>
         public void Immediately()
