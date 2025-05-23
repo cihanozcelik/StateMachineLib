@@ -427,6 +427,10 @@ namespace Nopnag.StateMachineLib
       // Unsubscribe EventBus listeners
       foreach (var listener in _stateUnitEventBusListeners) listener.Unsubscribe();
       _stateUnitEventBusListeners.Clear();
+      
+      // Clear callback lists to prevent memory leaks
+      _scheduledCallbacks.Clear();
+      _periodicCallbacks.Clear();
     }
   }
 }
