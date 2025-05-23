@@ -132,16 +132,6 @@ namespace Nopnag.StateMachineLib
         return;
       }
 
-      if (!_units.Contains(unit) &&
-          unit != InitialUnit) // InitialUnit might not be in _units if graph is empty then InitialUnit set externally
-      {
-        // This check might be too strict if states can be added/removed dynamically in complex ways
-        // For now, assume states are created via CreateState/CreateUnit or InitialUnit is valid.
-        // UnityEngine.Debug.LogWarning($"Attempted to start state '{unit.Name}' which is not part of this graph's known units.");
-        // To be safer, we could add it: if(!_units.Contains(unit)) _units.Add(unit);
-        // However, a state should know its graph.
-      }
-
       CurrentUnit?.Exit();
       CurrentUnit = unit;
       CurrentUnit.Start();

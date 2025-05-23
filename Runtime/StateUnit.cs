@@ -172,15 +172,6 @@ namespace Nopnag.StateMachineLib
       _stateUnitEventBusListeners.Add(handle);
     }
 
-    [Obsolete("Use On<T>() instead.", false)]
-    public void ListenSignal<T>(ref Action<T> signal, Action<T> sensor)
-    {
-      signal += parameter =>
-      {
-        if (IsActive()) sensor(parameter);
-      };
-    }
-
     /// <summary>
     /// A synonym for Listen. Subscribes to events of type T from the EventBus, but only invokes the listener while this state is active.
     /// </summary>
@@ -200,18 +191,6 @@ namespace Nopnag.StateMachineLib
     public void On<T>(EventQuery<T> query, ListenerDelegate<T> listener) where T : BusEvent
     {
       Listen(query, listener);
-    }
-
-    /// <summary>
-    /// A synonym for ListenSignal. Subscribes a sensor Action to an external signal Action.
-    /// The sensor is only invoked if this StateUnit is active when the signal is raised.
-    /// </summary>
-    /// <typeparam name="T">The type of the parameter for the signal and sensor actions.</typeparam>
-    /// <param name="signal">The external signal Action to listen to (passed by reference).</param>
-    /// <param name="sensor">The Action to execute when the signal is raised and this state is active.</param>
-    public void On<T>(ref Action<T> signal, Action<T> sensor)
-    {
-      ListenSignal(ref signal, sensor);
     }
 
     // --- Operator Overloads for Fluent API ---
@@ -427,6 +406,10 @@ namespace Nopnag.StateMachineLib
       // Unsubscribe EventBus listeners
       foreach (var listener in _stateUnitEventBusListeners) listener.Unsubscribe();
       _stateUnitEventBusListeners.Clear();
+
+      // Clear callback lists to prevent memory leaks
+      _scheduledCallbacks.Clear();
+      _periodicCallbacks.Clear();
     }
   }
 }

@@ -65,10 +65,8 @@ namespace Nopnag.StateMachineLib.Tests
     bool _anyStatePredicateCondition; // For testing AnyState.When
     bool _eventAListenerCalled, _eventBListenerCalled, _damageListenerCalled;
 
-    Action      _fluentTestActionSignal;                           // Used for ref parameter
-    Action<int> _fluentTestActionSignalWithParam;                  // Used for ref parameter
-    StateGraph  _graphA, _graphB;                                  // For parallel graph tests
-    StateUnit   _state1, _state2, _state3, _stunnedState, _state4; // Added _state4 for more states
+    StateGraph _graphA, _graphB;                                  // For parallel graph tests
+    StateUnit  _state1, _state2, _state3, _stunnedState, _state4; // Added _state4 for more states
 
     bool         _state1Entered,     _state1Updated,     _state1Exited;
     int          _state1UpdateCount, _state2UpdateCount, _state3UpdateCount, _state4UpdateCount;
@@ -78,112 +76,12 @@ namespace Nopnag.StateMachineLib.Tests
     bool         _state4Entered,     _state4Updated,     _state4Exited; // Added flags for _state4
     StateMachine _stateMachine;
     bool         _stunnedEntered, _stunnedUpdated, _stunnedExited;
-    Action       _testAction;
-    Action<int>  _testActionWithParam; // Added for parameterized action tests
 
     // ---- Start of StateMachineWrapper Tests ----
     bool _wrapperTest_StateEntered     = false;
     bool _wrapperTest_StateExited      = false;
     int  _wrapperTest_StateUpdateCount = 0;
     bool _wrapperTest_StateUpdated     = false;
-
-    [UnityTest]
-    public IEnumerator AnyState_Operator_OnAction_Parameterless_TransitionsFromActiveState()
-    {
-      Action anyStateSignal = null;
-      (StateGraph.Any > _state2).On(ref anyStateSignal);
-
-      _graphA.InitialUnit = _state1;
-      _stateMachine.Start(); // Enters _state1
-      yield return null;
-      Assert.AreEqual("State1", _graphA.GetCurrentStateName());
-      Assert.IsFalse(_state2Entered);
-
-      anyStateSignal?.Invoke();
-      _stateMachine.UpdateMachine();
-      yield return null;
-
-      Assert.AreEqual("State2", _graphA.GetCurrentStateName(),
-        "S1->S2: Did not transition via AnyState on parameterless Action.");
-      Assert.IsTrue(_state1Exited);
-      Assert.IsTrue(_state2Entered);
-
-      // Reset for transition from another state (_state2 already exited, _state3 will be the source)
-      _stateMachine.Exit();
-      yield return null;
-      Setup(); // Full reset
-
-      Action anotherAnyStateSignal = null; // Use a new action instance for the new setup
-      (StateGraph.Any > _state3).On(ref anotherAnyStateSignal); // Any -> _state3
-      (_state1 > _state2).Immediately(); // Go to _state2 first: _state1 -> _state2
-
-      _graphA.InitialUnit = _state1;
-      _stateMachine.Start();         // _state1 active
-      _stateMachine.UpdateMachine(); // Process _state1 -> _state2
-      yield return null;
-      Assert.AreEqual("State2", _graphA.GetCurrentStateName(),
-        "Setup S2->S3: Should be in State2.");
-      _state1Exited = _state2Exited = _state3Entered = false; // Reset flags
-
-      anotherAnyStateSignal?.Invoke();
-      _stateMachine.UpdateMachine();
-      yield return null;
-
-      Assert.AreEqual("State3", _graphA.GetCurrentStateName(),
-        "S2->S3: Did not transition via AnyState on parameterless Action from State2.");
-      Assert.IsTrue(_state2Exited);
-      Assert.IsTrue(_state3Entered);
-    }
-
-    [UnityTest]
-    public IEnumerator AnyState_Operator_OnAction_WithParameter_TransitionsFromActiveState()
-    {
-      Action<int> anyStateSignalWithParam = null;
-      (StateGraph.Any > _state2).On(ref anyStateSignalWithParam);
-
-      _graphA.InitialUnit = _state1;
-      _stateMachine.Start();
-      yield return null;
-      Assert.AreEqual("State1", _graphA.GetCurrentStateName());
-      Assert.IsFalse(_state2Entered);
-
-      anyStateSignalWithParam?.Invoke(123);
-      _stateMachine.UpdateMachine();
-      yield return null;
-
-      Assert.AreEqual("State2", _graphA.GetCurrentStateName(),
-        "S1->S2: Did not transition via AnyState on Action<int>.");
-      Assert.IsTrue(_state1Exited);
-      Assert.IsTrue(_state2Entered);
-
-      // Reset for transition from another state
-      _stateMachine.Exit();
-      yield return null;
-      Setup();
-
-      Action<string> anotherAnyStateSignal = null;
-      (StateGraph.Any > _state3).On(ref anotherAnyStateSignal); // Any -> _state3 with string param
-      (_state1 > _state2).Immediately();                        // Go to _state2 first
-
-      _graphA.InitialUnit = _state1;
-      _stateMachine.Start();
-      _stateMachine.UpdateMachine();
-      yield return null;
-      // Corrected assert message from "Setup S2->S3 Query: Should be in State2."
-      Assert.AreEqual("State2", _graphA.GetCurrentStateName(),
-        "Setup S2->S3 Action: Should be in State2.");
-      _state1Exited = _state2Exited = _state3Entered = false;
-
-      // Corrected: Invoke the Action<string> instead of raising an event
-      anotherAnyStateSignal?.Invoke("test_payload_for_s3_transition");
-      _stateMachine.UpdateMachine();
-      yield return null;
-
-      Assert.AreEqual("State3", _graphA.GetCurrentStateName(),
-        "S2->S3: Did not transition via AnyState on Action<string> from State2.");
-      Assert.IsTrue(_state2Exited);
-      Assert.IsTrue(_state3Entered);
-    }
 
     [UnityTest]
     public IEnumerator AnyState_Operator_OnEvent_TransitionsFromActiveState()
@@ -693,60 +591,6 @@ namespace Nopnag.StateMachineLib.Tests
     }
 
     [UnityTest]
-    public IEnumerator FluentAPI_OnAction_Parameterless_WorksOnInvoke()
-    {
-      var graph = _stateMachine.CreateGraph();
-      var s1    = graph.CreateState();
-      var s2    = graph.CreateState();
-      s1.OnExit               = () => _state1Exited  = true;
-      s2.OnEnter              = () => _state2Entered = true;
-      _state1Exited           = false;
-      _state2Entered          = false;
-      _fluentTestActionSignal = null; // Ensure fresh for ref
-
-      (s1 > s2).On(ref _fluentTestActionSignal);
-
-      graph.InitialUnit = s1;
-      graph.EnterGraph();
-      yield return null;
-      Assert.IsTrue(graph.IsUnitActive(s1));
-
-      _fluentTestActionSignal?.Invoke();
-      yield return null;
-      Assert.IsTrue(graph.IsUnitActive(s2),
-        "Did not transition on Action invoke using fluent API.");
-      Assert.IsTrue(_state1Exited);
-      Assert.IsTrue(_state2Entered);
-    }
-
-    [UnityTest]
-    public IEnumerator FluentAPI_OnAction_WithParameter_WorksOnInvoke()
-    {
-      var graph = _stateMachine.CreateGraph();
-      var s1    = graph.CreateState();
-      var s2    = graph.CreateState();
-      s1.OnExit                        = () => _state1Exited  = true;
-      s2.OnEnter                       = () => _state2Entered = true;
-      _state1Exited                    = false;
-      _state2Entered                   = false;
-      _fluentTestActionSignalWithParam = null; // Ensure fresh for ref
-
-      (s1 > s2).On(ref _fluentTestActionSignalWithParam);
-
-      graph.InitialUnit = s1;
-      graph.EnterGraph();
-      yield return null;
-      Assert.IsTrue(graph.IsUnitActive(s1));
-
-      _fluentTestActionSignalWithParam?.Invoke(123);
-      yield return null;
-      Assert.IsTrue(graph.IsUnitActive(s2),
-        "Did not transition on Action<int> invoke using fluent API.");
-      Assert.IsTrue(_state1Exited);
-      Assert.IsTrue(_state2Entered);
-    }
-
-    [UnityTest]
     public IEnumerator FluentAPI_OnEvent_Generic_WorksOnRaise()
     {
       var graph = _stateMachine.CreateGraph();
@@ -1074,45 +918,6 @@ namespace Nopnag.StateMachineLib.Tests
     }
 
     [UnityTest]
-    public IEnumerator NewAPI_OnSignal_RefAction_OnlyWhileActive_UsingCreateState()
-    {
-      var            graph                   = _stateMachine.CreateGraph();
-      var            s1                      = graph.CreateState();
-      var            s2                      = graph.CreateState();
-      var            s1_SignalListenerCalled = false;
-      Action<string> testSignal              = null; // The signal Action
-
-      s1.On(ref testSignal, (payload) =>
-      {
-        s1_SignalListenerCalled = true;
-        Debug.Log($"s1 received signal with payload: {payload}");
-      }); // New API
-
-      graph.InitialUnit = s1;
-      graph.EnterGraph();
-      yield return null;
-
-      // Invoke signal while s1 is active
-      testSignal?.Invoke("Hello from active state");
-      yield return null;
-      Assert.IsTrue(s1_SignalListenerCalled,
-        "s1_SignalListenerCalled should be true after signal invoked while s1 active.");
-
-      // Transition to s2
-      s1_SignalListenerCalled = false;             // Reset flag
-      BasicTransition.Connect(s1, s2, dt => true); // Immediate transition
-      graph.UpdateGraph();                         // Process transition
-      yield return null;
-      Assert.IsTrue(graph.IsUnitActive(s2), "Should have transitioned to s2.");
-
-      // Invoke signal while s1 is NOT active (s2 is active)
-      testSignal?.Invoke("Hello from inactive state");
-      yield return null;
-      Assert.IsFalse(s1_SignalListenerCalled,
-        "s1_SignalListenerCalled should be false after signal invoked while s1 NOT active.");
-    }
-
-    [UnityTest]
     public IEnumerator NewAPI_StateFunctions_CalledCorrectly_UsingCreateState()
     {
       var graph =
@@ -1228,7 +1033,6 @@ namespace Nopnag.StateMachineLib.Tests
       _actionListenerCalled = false;
       _state1UpdateTime     = _state2UpdateTime  = _state3UpdateTime  = 0f;
       _state1UpdateCount    = _state2UpdateCount = _state3UpdateCount = 0;
-      _testAction           = null; // Reset action delegate
 
       // Assign basic functions to track calls
       _state1.EnterStateFunction = () =>
@@ -1546,18 +1350,16 @@ namespace Nopnag.StateMachineLib.Tests
       Assert.IsTrue(atCallbackCalled, "At callback not called on first enter.");
       Assert.AreEqual(1, atCallbackCount, "At callback count incorrect on first enter.");
 
-      // Transition to State2 and back to State1 using TransitionByAction
+      // Transition to State2 and back to State1 using EventBus-based transitions
       atCallbackCalled = false; // Reset flag for re-enter
-      Action transitionToS2       = null;
-      Action transitionToS1FromS2 = null;
-      TransitionByAction.Connect(_state1, _state2, ref transitionToS2);
-      TransitionByAction.Connect(_state2, _state1, ref transitionToS1FromS2);
+      TransitionByEvent.Connect<TestEventA>(_state1, _state2);
+      TransitionByEvent.Connect<TestEventB>(_state2, _state1);
 
-      transitionToS2?.Invoke(); // Trigger _state1 -> _state2
+      EventBus<TestEventA>.Raise(new TestEventA()); // Trigger _state1 -> _state2
       yield return null;        // Allow transition to complete
       Assert.AreEqual("State2", _graphA.GetCurrentStateName());
 
-      transitionToS1FromS2?.Invoke(); // Trigger _state2 -> _state1 (re-enter _state1)
+      EventBus<TestEventB>.Raise(new TestEventB()); // Trigger _state2 -> _state1 (re-enter _state1)
       yield return null;              // Allow transition to complete
       Assert.AreEqual("State1", _graphA.GetCurrentStateName());
       Assert.IsFalse(atCallbackCalled,
@@ -1631,18 +1433,16 @@ namespace Nopnag.StateMachineLib.Tests
       yield return null;
       Assert.AreEqual(2, atEveryCallbackCount, "AtEvery not called on 2nd interval (first enter).");
 
-      // Transition to State2 and back to State1 using TransitionByAction
+      // Transition to State2 and back to State1 using EventBus-based transitions
       atEveryCallbackCount = 0; // Reset counter for re-enter
-      Action transitionToS2       = null;
-      Action transitionToS1FromS2 = null;
-      TransitionByAction.Connect(_state1, _state2, ref transitionToS2);
-      TransitionByAction.Connect(_state2, _state1, ref transitionToS1FromS2);
+      TransitionByEvent.Connect<TestEventA>(_state1, _state2);
+      TransitionByEvent.Connect<TestEventB>(_state2, _state1);
 
-      transitionToS2?.Invoke(); // _state1 -> _state2
+      EventBus<TestEventA>.Raise(new TestEventA()); // _state1 -> _state2
       yield return null;        // Allow transition to complete
       Assert.AreEqual("State2", _graphA.GetCurrentStateName());
 
-      transitionToS1FromS2?.Invoke(); // _state2 -> _state1 (re-enter _state1)
+      EventBus<TestEventB>.Raise(new TestEventB()); // _state2 -> _state1 (re-enter _state1)
       yield return null;              // Allow transition to complete
       Assert.AreEqual("State1", _graphA.GetCurrentStateName());
       Assert.AreEqual(0, atEveryCallbackCount,
@@ -1815,23 +1615,6 @@ namespace Nopnag.StateMachineLib.Tests
     {
       _stateMachine?.Exit(); // Ensure state machine is exited after tests
       // Potentially clear EventBus listeners here if needed and possible
-    }
-
-    [UnityTest]
-    public IEnumerator TransitionByAction_WorksOnInvoke()
-    {
-      TransitionByAction.Connect(_state1, _state2, ref _testAction);
-      _stateMachine.Start();
-      yield return null;
-      Assert.AreEqual("State1", _graphA.GetCurrentStateName());
-
-      _testAction?.Invoke();
-      yield return null; // Wait for state change
-
-      Assert.AreEqual("State2", _graphA.GetCurrentStateName(),
-        "Did not transition on Action invoke.");
-      Assert.IsTrue(_state1Exited);
-      Assert.IsTrue(_state2Entered);
     }
 
     // Test for damage event transition (similar to README example)
