@@ -123,18 +123,33 @@ namespace Nopnag.StateMachineLib
       set => UpdateStateBeforeTransitionCheckFunction = value;
     }
 
+    // IPoweredNode explicit implementations
+    public void AttachChild(IPoweredNode child)
+    {
+      _poweredNode.AttachChild(child);
+    }
+
     public void AttachGraph(StateGraph graph)
     {
+      AttachChild(graph);
       _graphHost.AttachGraph(graph);
     }
 
     public StateGraph CreateGraph()
     {
-      return _graphHost.CreateGraph();
+      var graph = _graphHost.CreateGraph();
+      AttachChild(graph);
+      return graph;
+    }
+
+    public void DetachChild(IPoweredNode child)
+    {
+      _poweredNode.DetachChild(child);
     }
 
     public void DetachGraph(StateGraph graph)
     {
+      DetachChild(graph);
       _graphHost.DetachGraph(graph);
     }
 
@@ -162,6 +177,16 @@ namespace Nopnag.StateMachineLib
     public void LocalRaise<T>(T busEvent) where T : BusEvent
     {
       _graphHost.LocalRaise(busEvent);
+    }
+
+    void IPoweredNode.RefreshPowerState()
+    {
+      _poweredNode.RefreshPowerState();
+    }
+
+    public void SetParent(IPoweredNode? parent)
+    {
+      _poweredNode.SetParent(parent);
     }
 
     public void SetTurnedOn(bool on)
@@ -518,11 +543,5 @@ namespace Nopnag.StateMachineLib
       // Dispose GraphHost to clean up all hosted graphs
       _graphHost.Dispose();
     }
-
-    // IPoweredNode explicit implementations
-    void IPoweredNode.AttachChild(IPoweredNode child) => _poweredNode.AttachChild(child);
-    void IPoweredNode.DetachChild(IPoweredNode child) => _poweredNode.DetachChild(child);
-    void IPoweredNode.RefreshPowerState() => _poweredNode.RefreshPowerState();
-    void IPoweredNode.SetParent(IPoweredNode? parent) => _poweredNode.SetParent(parent);
   }
 }
