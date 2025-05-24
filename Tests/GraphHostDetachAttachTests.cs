@@ -749,7 +749,7 @@ namespace Nopnag.StateMachineLib.Tests
       _stateMachine.DetachGraph(_detachableGraph);
 
       // Detached graph tries to send local event
-      Assert.Throws<ObjectDisposedException>(() => 
+      Assert.Throws<InvalidOperationException>(() => 
         _detachableGraph.LocalRaise(new TestDetachEvent()),
         "Detached graph should not be able to send local events");
     }

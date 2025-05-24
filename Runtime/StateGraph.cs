@@ -113,6 +113,8 @@ namespace Nopnag.StateMachineLib
     public void LocalRaise<T>(T busEvent) where T : BusEvent
     {
       if (_isDisposedByParent) throw new ObjectDisposedException(nameof(StateGraph));
+      if (!IsGraphActive) 
+        throw new InvalidOperationException("Cannot raise local event on an inactive graph. The graph might be detached or turned off.");
       _graphHost.LocalRaise(busEvent);
     }
 
