@@ -168,6 +168,7 @@ namespace Nopnag.StateMachineLib
 
     public void ExitGraph()
     {
+      if (_isDisposedByParent) return; // Prevent operations on already disposed graph
       CurrentUnit?.Exit();
       CurrentUnit = null; // Clear current unit on exit
     }
@@ -330,12 +331,16 @@ namespace Nopnag.StateMachineLib
       _graphEventTransitionListeners.Add(listener);
     }
 
-    internal void MarkAsDisposed() // New method to be called by StateMachine
+    internal void MarkAsDisposed() // Called by GraphHost.DisposeAllGraphs or StateMachine.Dispose
     {
       _isDisposedByParent = true;
-      // Optionally, also ensure CurrentUnit is null if not already handled by ExitGraph
-      _currentUnit = null; // Set directly to avoid dispose check
+      // _currentUnit = null; // CurrentUnit is preserved if graph is only marked. Real disposal handles ExitGraph.
       ClearSubscriptions();
+    }
+
+    internal void ClearDisposedByParentFlagInternal()
+    {
+      _isDisposedByParent = false;
     }
   }
 }

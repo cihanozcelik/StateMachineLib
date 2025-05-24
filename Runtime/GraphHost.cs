@@ -28,6 +28,8 @@ namespace Nopnag.StateMachineLib
       if (graph == null) throw new ArgumentNullException(nameof(graph));
       if (_hostedGraphs.Contains(graph)) return; // Already hosted
 
+      ((IPoweredNode)graph).SetTurnedOn(true); // Re-activate the graph
+      graph.ClearDisposedByParentFlagInternal(); 
       _hostedGraphs.Add(graph);
       // Note: Each StateGraph now owns its own LocalEventBus, no need to set it
     }
@@ -54,8 +56,8 @@ namespace Nopnag.StateMachineLib
       if (_hostedGraphs.Remove(graph))
       {
         // Clean up the graph
-        graph.ExitGraph();
-        graph.MarkAsDisposed();
+        ((IPoweredNode)graph).SetTurnedOn(false); // Effectively deactivates the graph
+        // We don't call ExitGraph or MarkAsDisposed, as Detach is temporary.
       }
     }
 
@@ -136,8 +138,8 @@ namespace Nopnag.StateMachineLib
     {
       for (var i = 0; i < _hostedGraphs.Count; i++)
       {
-        _hostedGraphs[i].ExitGraph();
-        _hostedGraphs[i].MarkAsDisposed();
+        _hostedGraphs[i].ExitGraph();      
+        _hostedGraphs[i].MarkAsDisposed(); 
       }
 
       _hostedGraphs.Clear();
