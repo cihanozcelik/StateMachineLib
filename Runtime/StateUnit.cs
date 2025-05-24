@@ -7,7 +7,7 @@ using UnityEngine;
 
 namespace Nopnag.StateMachineLib
 {
-  public class StateUnit : IGraphHost
+  public class StateUnit : IGraphHost, IPoweredNode
   {
     struct PeriodicCallback
     {
@@ -65,25 +65,33 @@ namespace Nopnag.StateMachineLib
 
     // New multi-graph support via composition
     readonly List<PeriodicCallback> _periodicCallbacks = new();
-    float                           _previousTime;
+
+    // IPoweredNode implementation  
+    readonly PoweredNode _poweredNode;
+    float                _previousTime;
 
     readonly List<ScheduledCallback> _scheduledCallbacks         = new();
     List<IIListener>                 _stateUnitEventBusListeners = new();
 
     internal StateUnit(string name, StateGraph graph)
     {
-      Name          = name;
-      BaseGraph     = graph;
-      _graphHost    = new GraphHost();
+      Name         = name;
+      BaseGraph    = graph;
+      _graphHost   = new GraphHost();
+      _poweredNode = new PoweredNode(false);
+      _poweredNode.SetTurnedOn(true); // StateUnits are always turned on
     }
 
     internal StateUnit(StateGraph graph)
     {
-      BaseGraph     = graph;
-      _graphHost    = new GraphHost();
+      BaseGraph    = graph;
+      _graphHost   = new GraphHost();
+      _poweredNode = new PoweredNode(false);
+      _poweredNode.SetTurnedOn(true); // StateUnits are always turned on
     }
 
-    public float DeltaTimeSinceStart { get; private set; }
+    public   float         DeltaTimeSinceStart { get; private set; }
+    internal LocalEventBus LocalEventBus       => _graphHost.LocalEventBus;
     public Action OnEnter
     {
       get => EnterStateFunction;
@@ -135,19 +143,30 @@ namespace Nopnag.StateMachineLib
       _graphHost.FixedUpdateAllGraphs();
     }
 
+    // IPoweredNode implementation
+    public bool HasPower => _poweredNode.HasPower;
+
     public IReadOnlyList<StateGraph> HostedGraphs => _graphHost.HostedGraphs;
-    internal LocalEventBus LocalEventBus => _graphHost.LocalEventBus;
-    LocalEventBus IGraphHost.LocalEventBus => LocalEventBus;
+
+    public bool IsActive   => _poweredNode.IsActive && BaseGraph?.CurrentUnit == this;
+    public bool IsTurnedOn => _poweredNode.IsTurnedOn;
 
     public void LateUpdateAllGraphs()
     {
       _graphHost.LateUpdateAllGraphs();
     }
 
+    LocalEventBus IGraphHost.LocalEventBus => LocalEventBus;
+
     // IGraphHost implementation
     public void LocalRaise<T>(T busEvent) where T : BusEvent
     {
       _graphHost.LocalRaise(busEvent);
+    }
+
+    public void SetTurnedOn(bool on)
+    {
+      _poweredNode.SetTurnedOn(on);
     }
 
     public void UpdateAllGraphs()
@@ -171,12 +190,6 @@ namespace Nopnag.StateMachineLib
       _periodicCallbacks.Add(new PeriodicCallback(intervalTime, callback));
     }
 
-    public bool IsActive()
-    {
-      // Check if the BaseGraph is active and this unit is the current unit in its BaseGraph
-      return BaseGraph != null && BaseGraph.IsGraphActive && BaseGraph.CurrentUnit == this;
-    }
-
     /// <summary>
     /// Subscribes to events of type T from both Global and Local EventBus, but only invokes the listener while this state is active.
     /// </summary>
@@ -189,7 +202,7 @@ namespace Nopnag.StateMachineLib
       var globalHandle = EventBus<T>.Listen(
         @event =>
         {
-          if (IsActive()) listener.Invoke(@event);
+          if (IsActive) listener.Invoke(@event);
         }
       );
       _stateUnitEventBusListeners.Add(globalHandle);
@@ -200,7 +213,7 @@ namespace Nopnag.StateMachineLib
         var parentHandle = BaseGraph.LocalEventBus.On<T>().Listen(
           @event =>
           {
-            if (IsActive()) listener.Invoke(@event);
+            if (IsActive) listener.Invoke(@event);
           }
         );
         _stateUnitEventBusListeners.Add(parentHandle);
@@ -210,7 +223,7 @@ namespace Nopnag.StateMachineLib
       var localHandle = LocalEventBus.On<T>().Listen(
         @event =>
         {
-          if (IsActive()) listener.Invoke(@event);
+          if (IsActive) listener.Invoke(@event);
         }
       );
       _stateUnitEventBusListeners.Add(localHandle);
@@ -229,7 +242,7 @@ namespace Nopnag.StateMachineLib
       var globalHandle = query.Listen(
         @event =>
         {
-          if (IsActive()) listener.Invoke(@event);
+          if (IsActive) listener.Invoke(@event);
         }
       );
       _stateUnitEventBusListeners.Add(globalHandle);
@@ -240,7 +253,7 @@ namespace Nopnag.StateMachineLib
         var parentHandle = BaseGraph.LocalEventBus.On<T>().Listen(
           @event =>
           {
-            if (IsActive()) listener.Invoke(@event);
+            if (IsActive) listener.Invoke(@event);
           }
         );
         _stateUnitEventBusListeners.Add(parentHandle);
@@ -250,7 +263,7 @@ namespace Nopnag.StateMachineLib
       var localHandle = LocalEventBus.On<T>().Listen(
         @event =>
         {
-          if (IsActive()) listener.Invoke(@event);
+          if (IsActive) listener.Invoke(@event);
         }
       );
       _stateUnitEventBusListeners.Add(localHandle);
@@ -377,6 +390,7 @@ namespace Nopnag.StateMachineLib
     {
       _previousTime       = Time.time;
       DeltaTimeSinceStart = 0;
+
       EnterStateFunction?.Invoke();
 
       // Start all hosted graphs via GraphHost
@@ -504,5 +518,11 @@ namespace Nopnag.StateMachineLib
       // Dispose GraphHost to clean up all hosted graphs
       _graphHost.Dispose();
     }
+
+    // IPoweredNode explicit implementations
+    void IPoweredNode.AttachChild(IPoweredNode child) => _poweredNode.AttachChild(child);
+    void IPoweredNode.DetachChild(IPoweredNode child) => _poweredNode.DetachChild(child);
+    void IPoweredNode.RefreshPowerState() => _poweredNode.RefreshPowerState();
+    void IPoweredNode.SetParent(IPoweredNode? parent) => _poweredNode.SetParent(parent);
   }
 }

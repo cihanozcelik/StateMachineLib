@@ -487,8 +487,8 @@ namespace Nopnag.StateMachineLib.Tests
       (s1 > s2).After(transitionDuration);
 
       graph.InitialUnit = s1;
-      graph.EnterGraph();
-      Assert.IsTrue(graph.IsUnitActive(s1));
+      _stateMachine.Start();
+      Assert.IsTrue(s1.IsActive);
       yield return null;
 
       // Check it doesn't transition before time
@@ -584,8 +584,8 @@ namespace Nopnag.StateMachineLib.Tests
       (s1 > s2).Immediately();
 
       graph.InitialUnit = s1;
-      graph.EnterGraph(); // Start should trigger Enter and immediate transition check
-      yield return null;  // Wait a frame for the transition to occur
+      _stateMachine.Start(); // Start should trigger Enter and immediate transition check
+      yield return null;     // Wait a frame for the transition to occur
 
       Assert.IsTrue(graph.IsUnitActive(s2),
         "Did not transition to s2 using fluent .Immediately() API.");
@@ -608,7 +608,7 @@ namespace Nopnag.StateMachineLib.Tests
       (s1 > s2).On<TestEventA>();
 
       graph.InitialUnit = s1;
-      graph.EnterGraph();
+      _stateMachine.Start();
       yield return null;
       Assert.IsTrue(graph.IsUnitActive(s1));
 
@@ -636,7 +636,7 @@ namespace Nopnag.StateMachineLib.Tests
       (s1 > s2).On<TestEventB>(evt => allowTransition);
 
       graph.InitialUnit = s1;
-      graph.EnterGraph();
+      _stateMachine.Start();
       yield return null;
 
       allowTransition = false;
@@ -669,7 +669,7 @@ namespace Nopnag.StateMachineLib.Tests
       (s1 > s2).On(query);
 
       graph.InitialUnit = s1;
-      graph.EnterGraph();
+      _stateMachine.Start();
       yield return null;
 
       var evtWrong = new TestEventWithParam();
@@ -704,7 +704,7 @@ namespace Nopnag.StateMachineLib.Tests
       (s1 > s2).On(query, evt => allowTransitionPredicate);
 
       graph.InitialUnit = s1;
-      graph.EnterGraph();
+      _stateMachine.Start();
       yield return null;
 
       // Correct param, predicate false
@@ -745,7 +745,7 @@ namespace Nopnag.StateMachineLib.Tests
       (s1 > s2).When(elapsedTime => elapsedTime >= transitionTime);
 
       graph.InitialUnit = s1;
-      graph.EnterGraph(); // Isolate graph for this test
+      _stateMachine.Start(); // Isolate graph for this test
       Assert.IsTrue(graph.IsUnitActive(s1));
       yield return null; // Let initial Enter run
 
@@ -777,7 +777,7 @@ namespace Nopnag.StateMachineLib.Tests
       (s2_target < s1_source).When(elapsedTime => elapsedTime >= transitionTime);
 
       graph.InitialUnit = s1_source;
-      graph.EnterGraph();
+      _stateMachine.Start();
       Assert.IsTrue(graph.IsUnitActive(s1_source));
       yield return null;
 
@@ -841,7 +841,7 @@ namespace Nopnag.StateMachineLib.Tests
       s1.On<TestEventA>(evt => { s1_TestEventAListenerCalled = true; }); // New API
 
       graph.InitialUnit = s1;
-      graph.EnterGraph(); // Isolate graph
+      _stateMachine.Start(); // Isolate graph
       yield return null;
 
       // Event raised while s1 is active
@@ -882,7 +882,7 @@ namespace Nopnag.StateMachineLib.Tests
       s1.On<TestEventWithParam>(query, evt => { s1_QueryListenerCalled = true; }); // New API
 
       graph.InitialUnit = s1;
-      graph.EnterGraph();
+      _stateMachine.Start();
       yield return null;
 
       // Raise matching event while s1 active
@@ -953,7 +953,7 @@ namespace Nopnag.StateMachineLib.Tests
       // We will call graph.EnterGraph() and graph.UpdateGraph() directly to isolate this graph for the test
       // instead of _stateMachine.Start() and _stateMachine.UpdateMachine()
 
-      graph.EnterGraph();
+      _stateMachine.Start();
       yield return null; // For OnEnter
 
       Assert.IsTrue(s1Entered, "s1.OnEnter was not called.");
@@ -1880,7 +1880,7 @@ namespace Nopnag.StateMachineLib.Tests
       // Trigger event before dispose
       EventBus.Raise(new TestEvent());
       _sm_disposal.UpdateMachine();
-      Assert.IsTrue(_s2_disposal.IsActive(),
+      Assert.IsTrue(_s2_disposal.IsActive,
         "EventDrivenTransition_BeforeDispose: _s2_disposal should be active after event.");
 
       // Dispose
@@ -1913,9 +1913,9 @@ namespace Nopnag.StateMachineLib.Tests
 
       Assert.AreEqual(1, _eventHandlerCallCount_disposal,
         "DisposalTest: StateUnit listener should have been called once before dispose.");
-      // Assert.IsTrue(_s1_disposal.IsActive(), "DisposalTest: _s1_disposal should be active before dispose."); // This state should be false if transition to s2 occurred
+      // Assert.IsTrue(_s1_disposal.IsActive, "DisposalTest: _s1_disposal should be active before dispose."); // This state should be false if transition to s2 occurred
       // Check that transition to _s2_disposal occurred due to the event
-      Assert.IsTrue(_s2_disposal.IsActive(),
+      Assert.IsTrue(_s2_disposal.IsActive,
         "DisposalTest: _s2_disposal should be active after first event (transition).");
 
 
@@ -1930,7 +1930,7 @@ namespace Nopnag.StateMachineLib.Tests
 
       // Verify that no state is active or that the state did not change again in the disposed SM context.
       // Since the SM is disposed, its graphs are exited, and units are no longer "active" in that SM.
-      // Accessing _s1_disposal.IsActive() might be misleading if the underlying graph is gone or inactive.
+      // Accessing _s1_disposal.IsActive might be misleading if the underlying graph is gone or inactive.
       // A key test is that the event handler count remains 0.
       // We can also assert that an attempt to use the disposed SM throws an exception.
       Assert.Throws<ObjectDisposedException>(() =>
@@ -1972,14 +1972,14 @@ namespace Nopnag.StateMachineLib.Tests
       yield return null; // Allow SM to process Start
 
       Debug.Log("Current unit after Start and yield in WrapperDispose: " + graph.CurrentUnit?.Name);
-      Assert.IsTrue(local_s1.IsActive(),
+      Assert.IsTrue(local_s1.IsActive,
         "DisposalTest: Wrapper - local_s1 should be active after Start and before raising event.");
 
       EventBus.Raise(new TestEvent());
       managedSM.UpdateMachine(); // Manually call UpdateMachine to process the event
       Assert.AreEqual(1, local_callCount,
         "DisposalTest: Wrapper - Listener on local_s1 should have been called once before MB destroy.");
-      Assert.IsTrue(local_s2.IsActive(),
+      Assert.IsTrue(local_s2.IsActive,
         "DisposalTest: Wrapper - local_s2 should be active after first event (transition)."); // UNCOMMENT THIS ASSERT
 
       Object.DestroyImmediate(go);
