@@ -10,6 +10,7 @@ public class PoweredNode : IPoweredNode
   public PoweredNode(bool isPowerSource = false)
   {
     _isPowerSource = isPowerSource;
+    RefreshPowerState();
   }
 
   public void AttachChild(IPoweredNode child)
@@ -31,12 +32,7 @@ public class PoweredNode : IPoweredNode
 
   public void RefreshPowerState()
   {
-    var shouldHavePower = _parent?.IsActive ?? _isPowerSource;
-
-    if (HasPower == shouldHavePower)
-      return;
-
-    HasPower = shouldHavePower;
+    HasPower = (_isPowerSource && IsTurnedOn) || _parent?.IsActive == true;
 
     foreach (var child in _children)
       child.RefreshPowerState();
