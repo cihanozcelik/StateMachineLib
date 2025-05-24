@@ -7,7 +7,7 @@ using UnityEngine;
 
 namespace Nopnag.StateMachineLib
 {
-  public class StateUnit
+  public class StateUnit : IGraphHost, IPoweredNode
   {
     struct PeriodicCallback
     {
@@ -59,25 +59,39 @@ namespace Nopnag.StateMachineLib
 
     [Obsolete("Use OnUpdate instead.", false)]
     public Action<float> UpdateStateFunction;
+
+    // IGraphHost implementation
+    readonly GraphHost _graphHost;
+
+    // New multi-graph support via composition
     readonly List<PeriodicCallback> _periodicCallbacks = new();
-    float                           _previousTime;
+
+    // IPoweredNode implementation  
+    readonly PoweredNode _poweredNode;
+    float                _previousTime;
 
     readonly List<ScheduledCallback> _scheduledCallbacks         = new();
     List<IIListener>                 _stateUnitEventBusListeners = new();
-    StateGraph                       _subGraph;
 
-    public StateUnit(string name, StateGraph graph)
+    internal StateUnit(string name, StateGraph graph)
     {
-      Name      = name;
-      BaseGraph = graph;
+      Name         = name;
+      BaseGraph    = graph;
+      _graphHost   = new GraphHost();
+      _poweredNode = new PoweredNode(false);
+      _poweredNode.SetTurnedOn(true); // StateUnits are always turned on
     }
 
-    public StateUnit(StateGraph graph)
+    internal StateUnit(StateGraph graph)
     {
-      BaseGraph = graph;
+      BaseGraph    = graph;
+      _graphHost   = new GraphHost();
+      _poweredNode = new PoweredNode(false);
+      _poweredNode.SetTurnedOn(true); // StateUnits are always turned on
     }
 
-    public float DeltaTimeSinceStart { get; private set; }
+    public   float         DeltaTimeSinceStart { get; private set; }
+    internal LocalEventBus LocalEventBus       => _graphHost.LocalEventBus;
     public Action OnEnter
     {
       get => EnterStateFunction;
@@ -109,6 +123,82 @@ namespace Nopnag.StateMachineLib
       set => UpdateStateBeforeTransitionCheckFunction = value;
     }
 
+    // IPoweredNode explicit implementations
+    public void AttachChild(IPoweredNode child)
+    {
+      _poweredNode.AttachChild(child);
+    }
+
+    public void AttachGraph(StateGraph graph)
+    {
+      AttachChild(graph);
+      _graphHost.AttachGraph(graph);
+    }
+
+    public StateGraph CreateGraph()
+    {
+      var graph = _graphHost.CreateGraph();
+      AttachChild(graph);
+      return graph;
+    }
+
+    public void DetachChild(IPoweredNode child)
+    {
+      _poweredNode.DetachChild(child);
+    }
+
+    public void DetachGraph(StateGraph graph)
+    {
+      DetachChild(graph);
+      _graphHost.DetachGraph(graph);
+    }
+
+    public void FixedUpdateAllGraphs()
+    {
+      _graphHost.FixedUpdateAllGraphs();
+    }
+
+    // IPoweredNode implementation
+    public bool HasPower => _poweredNode.HasPower;
+
+    public IReadOnlyList<StateGraph> HostedGraphs => _graphHost.HostedGraphs;
+
+    public bool IsActive   => _poweredNode.IsActive && BaseGraph?.CurrentUnit == this;
+    public bool IsTurnedOn => _poweredNode.IsTurnedOn;
+
+    public void LateUpdateAllGraphs()
+    {
+      _graphHost.LateUpdateAllGraphs();
+    }
+
+    LocalEventBus IGraphHost.LocalEventBus => LocalEventBus;
+
+    // IGraphHost implementation
+    public void LocalRaise<T>(T busEvent) where T : BusEvent
+    {
+      _graphHost.LocalRaise(busEvent);
+    }
+
+    void IPoweredNode.RefreshPowerState()
+    {
+      _poweredNode.RefreshPowerState();
+    }
+
+    public void SetParent(IPoweredNode? parent)
+    {
+      _poweredNode.SetParent(parent);
+    }
+
+    public void SetTurnedOn(bool on)
+    {
+      _poweredNode.SetTurnedOn(on);
+    }
+
+    public void UpdateAllGraphs()
+    {
+      _graphHost.UpdateAllGraphs();
+    }
+
     public void At(float targetTime, Action callback)
     {
       _scheduledCallbacks.Add(new ScheduledCallback(targetTime, callback));
@@ -125,37 +215,47 @@ namespace Nopnag.StateMachineLib
       _periodicCallbacks.Add(new PeriodicCallback(intervalTime, callback));
     }
 
-    public StateGraph GetSubStateGraph()
-    {
-      _subGraph = new StateGraph();
-      return _subGraph;
-    }
-
-    public bool IsActive()
-    {
-      // Check if the BaseGraph is active and this unit is the current unit in its BaseGraph
-      return BaseGraph != null && BaseGraph.IsGraphActive && BaseGraph.CurrentUnit == this;
-    }
-
     /// <summary>
-    /// Subscribes to events of type T from the EventBus, but only invokes the listener while this state is active.
+    /// Subscribes to events of type T from both Global and Local EventBus, but only invokes the listener while this state is active.
     /// </summary>
     /// <typeparam name="T">The event type to listen for.</typeparam>
     /// <param name="listener">The callback to invoke when the event is raised and this state is active.</param>
     [Obsolete("Use On<T>(listener) instead.", false)]
     public void Listen<T>(ListenerDelegate<T> listener) where T : BusEvent
     {
-      var handle = EventBus<T>.Listen(
+      // Subscribe to Global EventBus
+      var globalHandle = EventBus<T>.Listen(
         @event =>
         {
-          if (IsActive()) listener.Invoke(@event);
+          if (IsActive) listener.Invoke(@event);
         }
       );
-      _stateUnitEventBusListeners.Add(handle);
+      _stateUnitEventBusListeners.Add(globalHandle);
+
+      // Subscribe to BaseGraph's LocalEventBus (parent graph events)
+      if (BaseGraph != null)
+      {
+        var parentHandle = BaseGraph.LocalEventBus.On<T>().Listen(
+          @event =>
+          {
+            if (IsActive) listener.Invoke(@event);
+          }
+        );
+        _stateUnitEventBusListeners.Add(parentHandle);
+      }
+
+      // Subscribe to own LocalEventBus (subgraph events)
+      var localHandle = LocalEventBus.On<T>().Listen(
+        @event =>
+        {
+          if (IsActive) listener.Invoke(@event);
+        }
+      );
+      _stateUnitEventBusListeners.Add(localHandle);
     }
 
     /// <summary>
-    /// Subscribes to filtered events (via EventQuery) of type T from the EventBus, but only invokes the listener while this state is active.
+    /// Subscribes to filtered events (via EventQuery) of type T from both Global and Local EventBus, but only invokes the listener while this state is active.
     /// </summary>
     /// <typeparam name="T">The event type to listen for.</typeparam>
     /// <param name="query">The EventQuery to filter which events to listen for.</param>
@@ -163,17 +263,39 @@ namespace Nopnag.StateMachineLib
     [Obsolete("Use On<T>(query, listener) instead.", false)]
     public void Listen<T>(EventQuery<T> query, ListenerDelegate<T> listener) where T : BusEvent
     {
-      var handle = query.Listen(
+      // Subscribe to Global EventBus with query
+      var globalHandle = query.Listen(
         @event =>
         {
-          if (IsActive()) listener.Invoke(@event);
+          if (IsActive) listener.Invoke(@event);
         }
       );
-      _stateUnitEventBusListeners.Add(handle);
+      _stateUnitEventBusListeners.Add(globalHandle);
+
+      // Subscribe to BaseGraph's LocalEventBus (parent graph events)
+      if (BaseGraph != null)
+      {
+        var parentHandle = BaseGraph.LocalEventBus.On<T>().Listen(
+          @event =>
+          {
+            if (IsActive) listener.Invoke(@event);
+          }
+        );
+        _stateUnitEventBusListeners.Add(parentHandle);
+      }
+
+      // Subscribe to own LocalEventBus (subgraph events)
+      var localHandle = LocalEventBus.On<T>().Listen(
+        @event =>
+        {
+          if (IsActive) listener.Invoke(@event);
+        }
+      );
+      _stateUnitEventBusListeners.Add(localHandle);
     }
 
     /// <summary>
-    /// A synonym for Listen. Subscribes to events of type T from the EventBus, but only invokes the listener while this state is active.
+    /// Subscribes to events of type T from both Global and Local EventBus, but only invokes the listener while this state is active.
     /// </summary>
     /// <typeparam name="T">The event type to listen for.</typeparam>
     /// <param name="listener">The callback to invoke when the event is raised and this state is active.</param>
@@ -183,7 +305,7 @@ namespace Nopnag.StateMachineLib
     }
 
     /// <summary>
-    /// A synonym for Listen. Subscribes to filtered events (via EventQuery) of type T from the EventBus, but only invokes the listener while this state is active.
+    /// Subscribes to filtered events (via EventQuery) of type T from both Global and Local EventBus, but only invokes the listener while this state is active.
     /// </summary>
     /// <typeparam name="T">The event type to listen for.</typeparam>
     /// <param name="query">The EventQuery to filter which events to listen for.</param>
@@ -289,17 +411,15 @@ namespace Nopnag.StateMachineLib
         "The '<' operator is not supported for AnyState transitions. Use '(StateGraph.Any > yourStateUnit)' to define transitions.");
     }
 
-    public void SetSubStateGraph(StateGraph subGraph)
-    {
-      _subGraph = subGraph;
-    }
-
     internal void Start()
     {
       _previousTime       = Time.time;
       DeltaTimeSinceStart = 0;
+
       EnterStateFunction?.Invoke();
-      _subGraph?.EnterGraph();
+
+      // Start all hosted graphs via GraphHost
+      _graphHost.StartAllGraphs();
 
       for (var i = 0; i < _scheduledCallbacks.Count; i++)
       {
@@ -332,20 +452,27 @@ namespace Nopnag.StateMachineLib
       if (CheckTransitions()) return false;
 
       UpdateStateFunction?.Invoke(DeltaTimeSinceStart);
-      _subGraph?.UpdateGraph();
+
+      // Update all hosted graphs via GraphHost
+      UpdateAllGraphs();
+
       return true;
     }
 
     internal void FixedUpdate()
     {
       FixedUpdateStateFunction?.Invoke(DeltaTimeSinceStart);
-      _subGraph?.FixedUpdateGraph();
+
+      // FixedUpdate all hosted graphs via GraphHost
+      FixedUpdateAllGraphs();
     }
 
     internal void LateUpdate()
     {
       LateUpdateStateFunction?.Invoke(DeltaTimeSinceStart);
-      _subGraph?.LateUpdateGraph();
+
+      // LateUpdate all hosted graphs via GraphHost
+      LateUpdateAllGraphs();
     }
 
     void CheckPeriodicCallbacks()
@@ -397,7 +524,9 @@ namespace Nopnag.StateMachineLib
 
     internal void Exit()
     {
-      _subGraph?.ExitGraph();
+      // Exit all hosted graphs via GraphHost
+      _graphHost.ExitAllGraphs();
+
       ExitStateFunction?.Invoke();
     }
 
@@ -410,6 +539,9 @@ namespace Nopnag.StateMachineLib
       // Clear callback lists to prevent memory leaks
       _scheduledCallbacks.Clear();
       _periodicCallbacks.Clear();
+
+      // Dispose GraphHost to clean up all hosted graphs
+      _graphHost.Dispose();
     }
   }
 }
