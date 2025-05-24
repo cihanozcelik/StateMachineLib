@@ -1,4 +1,5 @@
 #nullable enable
+using System;
 using System.Collections.Generic;
 
 public class PoweredNode : IPoweredNode
@@ -15,6 +16,16 @@ public class PoweredNode : IPoweredNode
 
   public void AttachChild(IPoweredNode child)
   {
+    if (child == this)
+      throw new ArgumentException("Node cannot be attached as its own child");
+
+    // Skip if the child is already in this list
+    if (_children.Contains(child)) return;
+
+    //Optional-safety: if the child already has a different parent, detach it first
+    if (child is PoweredNode pn && pn._parent != null)
+      pn._parent.DetachChild(child);
+
     _children.Add(child);
     child.SetParent(this);
   }
@@ -40,6 +51,8 @@ public class PoweredNode : IPoweredNode
 
   public void SetParent(IPoweredNode? parent)
   {
+    if (parent == this) // ← compare against the argument
+      throw new ArgumentException("Node cannot be its own parent");
     if (_parent == parent) return;
     _parent = parent;
     RefreshPowerState();
