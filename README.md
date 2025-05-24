@@ -4,107 +4,104 @@ A lightweight and flexible state machine library for C# and Unity, designed for 
 
 ## Overview
 
-StateMachineLib provides tools to structure application logic into distinct states and define transitions between them. It allows for multiple state graphs running concurrently and supports various ways to trigger transitions, including conditions, events (via `Nopnag.EventBusLib`), and direct calls.
+StateMachineLib provides tools to structure application logic into distinct states and define transitions between them. It allows for multiple state graphs running concurrently, supports hierarchical state machines (subgraphs), dynamic graph attachment/detachment, and a local event system alongside global event integration.
 
 ## API Usage Quick Reference
 
 ```csharp
 // --- Core Setup & Lifecycle ---
 StateMachine stateMachine = new StateMachine();
-StateGraph mainGraph = stateMachine.CreateGraph();
-StateUnit state1 = mainGraph.CreateState(); // Preferred
-// StateUnit namedState = mainGraph.CreateUnit("NamedState"); // Deprecated: If a name is needed, manage externally
-mainGraph.InitialUnit = state1; // Or first created is initial by default
-stateMachine.Start(); // Enters initial state of all graphs
+StateGraph mainGraph = stateMachine.CreateGraph(); // Creates a graph hosted by the StateMachine
+StateUnit state1 = mainGraph.CreateState(); // Preferred: Creates a state. Name is managed by user if needed.
+mainGraph.InitialUnit = state1; // Or first created state is initial by default.
+
+// Activate/Deactivate a graph
+// Graphs created via stateMachine.CreateGraph() or stateUnit.CreateGraph() are turned on by default.
+mainGraph.SetTurnedOn(false); // Explicitly deactivate a graph
+mainGraph.SetTurnedOn(true);  // Reactivate it
+
+stateMachine.Start(); // Enters initial state of all 'turned on' and 'powered' graphs.
 stateMachine.UpdateMachine();       // Call in game loop (e.g., Unity's Update)
 stateMachine.FixedUpdateMachine();  // Call in game loop (e.g., Unity's FixedUpdate)
 stateMachine.LateUpdateMachine();   // Call in game loop (e.g., Unity's LateUpdate)
-stateMachine.Exit(); // Exits all graphs and their current states
+stateMachine.Exit(); // Exits all graphs and their current states. Power state is also turned off.
+// Important: Call when StateMachine is no longer needed if not using a wrapper like StateMachineMB.
+stateMachine.Dispose(); 
+
+// --- Hierarchical Graphs (Subgraphs) ---
+// StateUnits can host subgraphs because StateUnit implements IGraphHost
+StateUnit parentStateHostingSubgraph = mainGraph.CreateState();
+StateGraph subGraph = parentStateHostingSubgraph.CreateGraph(); // Create a new subgraph under parentStateHostingSubgraph
+StateUnit childStateInSubgraph = subGraph.CreateState();
+subGraph.InitialUnit = childStateInSubgraph;
+// Subgraphs can also host their own subgraphs, creating deeper hierarchies.
+StateGraph subSubGraph = childStateInSubgraph.CreateGraph(); 
+// ...
+
+// --- Dynamic Graph Management (Attach/Detach) ---
+// Create a graph independently
+StateGraph independentGraph = new StateGraph();
+StateUnit someIndependentState = independentGraph.CreateState();
+independentGraph.InitialUnit = someIndependentState;
+// ... configure independentGraph ...
+
+// Attach it to the StateMachine or a StateUnit
+stateMachine.AttachGraph(independentGraph); // Becomes a top-level graph
+// parentStateHostingSubgraph.AttachGraph(anotherIndependentGraph); // Attaches under the parentState
+
+// Detach a graph (preserves its current state, makes it inactive, disconnects power)
+stateMachine.DetachGraph(independentGraph);
+// parentStateHostingSubgraph.DetachGraph(subGraph);
 
 // --- Local Event System ---
-// Each StateMachine has its own LocalEventBus for isolated event communication
-stateMachine.LocalRaise(new MyGameEvent()); // Raise event only within this StateMachine
-// Note: state.On<MyGameEvent>() and (state1 > state2).On<MyGameEvent>() automatically listen to BOTH global and local events
+// StateMachine and StateUnit (if hosting graphs) act as IGraphHost and have a LocalEventBus
+stateMachine.LocalRaise(new MyGameEvent()); // Event propagates to graphs hosted by stateMachine
+parentStateHostingSubgraph.LocalRaise(new MySubEvent()); // Event propagates to subGraph
 
-// --- StateUnit Logic Actions ---
-state1.OnEnter = () => { /* Logic for StateOne Enter */ };
-state1.OnUpdate = (timeInState) => { /* Logic for StateOne Update, timeInState is DeltaTimeSinceStart */ };
-state1.OnExit = () => { /* Logic for StateOne Exit */ };
-state1.OnFixedUpdate = (timeInState) => { /* Logic for StateOne FixedUpdate, timeInState is DeltaTimeSinceStart */ };
-state1.OnLateUpdate = (timeInState) => { /* Logic for StateOne LateUpdate, timeInState is DeltaTimeSinceStart */ };
-// state1.OnUpdateBeforeTransitionCheck = (timeInState) => { /* Optional: Logic before transitions, timeInState is DeltaTimeSinceStart */ };
+// --- StateUnit Logic Actions (OnEnter, OnUpdate, OnExit, etc.) ---
+state1.OnEnter = () => { /* Logic for state1 Enter */ };
+state1.OnUpdate = (timeInState) => { /* Logic for state1 Update */ };
+// ... (similarly for OnExit, OnFixedUpdate, OnLateUpdate)
 
 // --- Time-Based Callbacks (within StateUnit) ---
 state1.At(2.0f, () => { /* Action after 2 seconds in state1 */ });
 state1.AtEvery(1.0f, () => { /* Action every 1 second in state1 */ });
 
-// --- Event/Signal Listening (within StateUnit, while active) ---
-// Assumes: using Nopnag.EventBusLib;
-// public class MyGameEvent : BusEvent { public int Value; }
-// public class MyParam : IParameter {}
-state1.On<MyGameEvent>(evt => { /* Handle MyGameEvent from BOTH global and local EventBus */ });
-state1.On<MyGameEvent>(EventBus<MyGameEvent>.Where<MyParam>("filterKey"), evt => { /* Handle filtered MyGameEvent */ });
+// --- Event Listening (within StateUnit, for EventBus events) ---
+// state.On<MyEvent>() listens to both global EventBus and relevant LocalEventBus events
+state1.On<MyGameEvent>(evt => { /* Handle MyGameEvent */ });
 
-// --- Subgraphs / Hierarchical States ---
-StateUnit parentState = mainGraph.CreateState();
-StateGraph subGraph = parentState.GetSubStateGraph(); // Creates and assigns a new subgraph with LocalEventBus support
-// Alternative: Create elsewhere and attach
-// StateGraph subGraph = new StateGraph(); 
-// parentState.SetSubStateGraph(subGraph); // Automatically gets LocalEventBus support when attached
-StateUnit childState1 = subGraph.CreateState();
-subGraph.InitialUnit = childState1; // Set initial state for the subgraph
-
-// --- Fluent Transition Creation API ---
-// Assumes: StateUnit state1, state2, state3; MyGameEvent, MyParam etc. defined.
-// 1. Transition by Condition or Time
-(state1 > state2).When(elapsedTime => elapsedTime > 2.0f && SomeGlobalCondition());
-(state2 < state1).When(elapsedTime => elapsedTime > 2.0f); // (target < source) is equivalent
-(state1 > state2).After(3.5f); // After a specific duration
-
-// 2. Transition by Event (listens to BOTH global and local events automatically)
-(state1 > state2).On<MyGameEvent>();
-(state1 > state2).On<MyGameEvent>(evt => evt.Value > 5); // With predicate
-(state1 > state2).On(EventBus<MyGameEvent>.Where<MyParam>("filterKey")); // With query
-(state1 > state2).On(EventBus<MyGameEvent>.Where<MyParam>("filterKey"), evt => evt.Value > 5); // Query + predicate
-
-// 3. Immediate Transition
-(state1 > state2).Immediately(); // Unconditional immediate transition
-
-// 4. Transition to Indexed Target (from State to Array of States)
-(state1 > new[] { state2, state3 }).When(
-    elapsedTime => elapsedTime < 2.0f ? 0 : (elapsedTime < 5.0f ? 1 : -1) 
-    ); // Ex: to state2 if <2s, to state3 if <5s (-1 means no change)
-
-// 5. Transition to Dynamically Selected Target (from State to Dynamic Target Marker)
-(state1 > StateGraph.DynamicTarget).When(
-    elapsedTime => elapsedTime > 4.0f ? state2 : (elapsedTime > 1.0f ? state3 : null) 
-    ); // Ex: to state2 if >4s, to state3 if >1s, else no change
-
-// 6. Transitions from "Any State"
-// These transitions can occur from any active state within the graph.
-// They are evaluated with higher priority than regular state-to-state transitions.
-// Assumes: StateUnit state3; MyGameEvent etc. defined as in previous examples.
-
-// Define "Any State" transitions using the (StateGraph.Any > targetState) operator syntax:
-(StateGraph.Any > state3).When(elapsedTime => SomeGlobalCondition());
-(StateGraph.Any > state3).On<MyGameEvent>(evt => evt.Value > 10); // Listens to BOTH global and local events
-// This syntax supports .When(), .After(), .On<Event>(), .Immediately() etc.,
-// just like regular state-to-state transitions.
+// --- Fluent Transition Creation API (Examples) ---
+(state1 > childStateInSubgraph).When(elapsedTime => elapsedTime > 1.0f);
+(childStateInSubgraph > state1).On<MyGameEvent>();
+(StateGraph.Any > state1).Immediately(); // Any-state transition within a graph
 ```
 
 ## Key Features
 
-*   **Multiple Graphs:** Manage multiple independent state machines (`StateMachine` containing `StateGraph` instances) running in parallel.
-*   **State Units (`StateUnit`):** Define individual states with `Enter`, `Exit`, `Update`, `LateUpdate`, and `FixedUpdate` logic.
-*   **Rich Transition System:** Multiple ways to define transitions between states using a fluent API.
-*   **Local Event System:** Each `StateMachine` has its own `LocalEventBus` for isolated event communication within that state machine instance.
-*   **Dual Event Listening:** State event listeners and transitions automatically subscribe to both global and local events.
-*   **Time Tracking:** `StateUnit` tracks the time elapsed since it became active (`DeltaTimeSinceStart`).
-*   **Sub-States / Hierarchical States:** `StateUnit` can host its own `StateGraph` for complex, nested state logic.
-*   **EventBus Integration:** Trigger transitions based on events from `Nopnag.EventBusLib`.
-*   **Action Integration:** Trigger transitions via standard C# `Action` delegates.
-*   **Conditional Logic:** Use predicates (`Func<>`) for complex transition conditions.
-*   **Time-Based Callbacks:** Schedule actions to occur once after a specific delay (`At`) or repeatedly at set intervals (`AtEvery`) within a state.
+*   **Hierarchical State Machines (Subgraphs):** 
+    *   `StateUnit`s can host their own `StateGraph`s (`StateUnit` implements `IGraphHost`).
+    *   This allows for deeply nested state logic (graphs within graphs).
+*   **Dynamic Graph Management:**
+    *   **Attach/Detach:** `StateGraph`s can be dynamically attached (`AttachGraph()`) to or detached (`DetachGraph()`) from an `IGraphHost` (like `StateMachine` or `StateUnit`) at runtime.
+    *   Detaching preserves the graph's current state but makes it inactive. It can be re-attached later to resume.
+    *   Graphs can be created independently and then attached to an existing state hierarchy.
+*   **Activation Control (`SetTurnedOn`):** 
+    *   `StateGraph`s (and `StateMachine`s) can be individually turned on/off using `SetTurnedOn(bool)`.
+    *   A graph only receives updates and processes events if it's turned on and its parent in the power hierarchy is also active.
+*   **Local Event System (`LocalRaise`):**
+    *   `StateMachine` and `StateUnit` (when acting as `IGraphHost`) provide `LocalRaise<T>(T busEvent)` to dispatch events within their own hierarchy.
+    *   Events propagate downwards to hosted graphs.
+*   **Dual Event Listening:** 
+    *   `StateUnit.On<TEvent>()` and event-based transitions (`(s1 > s2).On<TEvent>()`) automatically listen to both global `EventBus` events and relevant `LocalEventBus` events from their parent `IGraphHost`(s).
+*   **Lifecycle Management (`Dispose`):**
+    *   `StateMachine` should be disposed via `Dispose()` when no longer needed (if not using a managed wrapper like `StateMachineMB`) to clean up resources and event subscriptions.
+    *   Disposing a `StateMachine` (or a `StateUnit` hosting graphs) will also dispose of all its hosted graphs.
+    *   Detached graphs are no longer managed by their previous host; if not re-attached and referenced, they are eligible for GC.
+*   **Simplified State Creation:** `StateGraph.CreateState()` is the preferred way to create `StateUnit`s.
+*   **Rich Transition System:** Fluent API for time-based, event-based, conditional, and immediate transitions.
+*   **Parallel Graphs:** `StateMachine` can manage multiple top-level `StateGraph`s.
+*   **Time-Based Callbacks:** `StateUnit.At()` and `StateUnit.AtEvery()` for timed actions within a state.
 
 ## Main Concepts
 
@@ -144,9 +141,9 @@ subGraph.InitialUnit = childState1; // Set initial state for the subgraph
 
 *   **`IStateTransition`**: The interface for all transition types that are checked during the `Update` loop of a `StateUnit`. Defines the `CheckTransition` method. (Event/Action based transitions trigger more directly).
 
-## Listening to Events & Signals Only While a State is Active
+## Listening to EventBus Events Only While a State is Active
 
-A powerful feature of StateMachineLib is the ability to listen to `EventBusLib` events only while a specific state is active. This is achieved using the `StateUnit.On` methods. The older `Listen` and `ListenSignal` methods are now deprecated.
+A powerful feature of StateMachineLib is the ability to listen to `EventBusLib` events only while a specific state is active. This is achieved using the `StateUnit.On` methods. The older `Listen` method for events is now deprecated.
 
 ### EventBus Event Listening (Basic Usage)
 ```csharp

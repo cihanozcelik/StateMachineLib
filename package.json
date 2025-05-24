@@ -1,8 +1,8 @@
 {
   "name": "com.nopnag.statemachinelib",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "displayName": "Nopnag State Machine",
-  "description": "A state machine implementation for Unity.",
+  "description": "A state machine implementation for Unity with support for hierarchical graphs, dynamic management, and local events.",
   "unity": "6000.1", 
   "dependencies": {
     "com.nopnag.eventbuslib": "1.1.0" 
@@ -11,6 +11,9 @@
     "state",
     "machine",
     "fsm",
+    "hierarchical",
+    "subgraph",
+    "eventbus",
     "nopnag"
   ],
   "author": {
