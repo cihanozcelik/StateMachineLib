@@ -849,7 +849,7 @@ namespace Nopnag.StateMachineLib.Tests
       _stateMachine.AttachGraph(_detachableGraph);
       _stateMachine.Exit();
 
-      Assert.AreEqual(originalState, _detachableGraph.CurrentUnit, "Exit should preserve state");
+      Assert.IsNull(_detachableGraph.CurrentUnit, "CurrentUnit should be null after StateMachine.Exit()");
       Assert.IsFalse(_detachableGraph.IsGraphActive, "Graph should be inactive after Exit");
 
       // Restart should work
