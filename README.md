@@ -21,6 +21,11 @@ stateMachine.FixedUpdateMachine();  // Call in game loop (e.g., Unity's FixedUpd
 stateMachine.LateUpdateMachine();   // Call in game loop (e.g., Unity's LateUpdate)
 stateMachine.Exit(); // Exits all graphs and their current states
 
+// --- Local Event System ---
+// Each StateMachine has its own LocalEventBus for isolated event communication
+stateMachine.LocalRaise(new MyGameEvent()); // Raise event only within this StateMachine
+// Note: state.On<MyGameEvent>() and (state1 > state2).On<MyGameEvent>() automatically listen to BOTH global and local events
+
 // --- StateUnit Logic Actions ---
 state1.OnEnter = () => { /* Logic for StateOne Enter */ };
 state1.OnUpdate = (timeInState) => { /* Logic for StateOne Update, timeInState is DeltaTimeSinceStart */ };
@@ -37,13 +42,15 @@ state1.AtEvery(1.0f, () => { /* Action every 1 second in state1 */ });
 // Assumes: using Nopnag.EventBusLib;
 // public class MyGameEvent : BusEvent { public int Value; }
 // public class MyParam : IParameter {}
-state1.On<MyGameEvent>(evt => { /* Handle MyGameEvent, e.g., Debug.Log(evt.Value) */ });
+state1.On<MyGameEvent>(evt => { /* Handle MyGameEvent from BOTH global and local EventBus */ });
 state1.On<MyGameEvent>(EventBus<MyGameEvent>.Where<MyParam>("filterKey"), evt => { /* Handle filtered MyGameEvent */ });
 
 // --- Subgraphs / Hierarchical States ---
 StateUnit parentState = mainGraph.CreateState();
-StateGraph subGraph = parentState.GetSubStateGraph(); // Creates and assigns a new subgraph
-// parentState.SetSubStateGraph(new StateGraph()); // Alternative: assign an existing graph
+StateGraph subGraph = parentState.GetSubStateGraph(); // Creates and assigns a new subgraph with LocalEventBus support
+// Alternative: Create elsewhere and attach
+// StateGraph subGraph = new StateGraph(); 
+// parentState.SetSubStateGraph(subGraph); // Automatically gets LocalEventBus support when attached
 StateUnit childState1 = subGraph.CreateState();
 subGraph.InitialUnit = childState1; // Set initial state for the subgraph
 
@@ -54,7 +61,7 @@ subGraph.InitialUnit = childState1; // Set initial state for the subgraph
 (state2 < state1).When(elapsedTime => elapsedTime > 2.0f); // (target < source) is equivalent
 (state1 > state2).After(3.5f); // After a specific duration
 
-// 2. Transition by Event
+// 2. Transition by Event (listens to BOTH global and local events automatically)
 (state1 > state2).On<MyGameEvent>();
 (state1 > state2).On<MyGameEvent>(evt => evt.Value > 5); // With predicate
 (state1 > state2).On(EventBus<MyGameEvent>.Where<MyParam>("filterKey")); // With query
@@ -80,7 +87,7 @@ subGraph.InitialUnit = childState1; // Set initial state for the subgraph
 
 // Define "Any State" transitions using the (StateGraph.Any > targetState) operator syntax:
 (StateGraph.Any > state3).When(elapsedTime => SomeGlobalCondition());
-(StateGraph.Any > state3).On<MyGameEvent>(evt => evt.Value > 10);
+(StateGraph.Any > state3).On<MyGameEvent>(evt => evt.Value > 10); // Listens to BOTH global and local events
 // This syntax supports .When(), .After(), .On<Event>(), .Immediately() etc.,
 // just like regular state-to-state transitions.
 ```
@@ -90,6 +97,8 @@ subGraph.InitialUnit = childState1; // Set initial state for the subgraph
 *   **Multiple Graphs:** Manage multiple independent state machines (`StateMachine` containing `StateGraph` instances) running in parallel.
 *   **State Units (`StateUnit`):** Define individual states with `Enter`, `Exit`, `Update`, `LateUpdate`, and `FixedUpdate` logic.
 *   **Rich Transition System:** Multiple ways to define transitions between states using a fluent API.
+*   **Local Event System:** Each `StateMachine` has its own `LocalEventBus` for isolated event communication within that state machine instance.
+*   **Dual Event Listening:** State event listeners and transitions automatically subscribe to both global and local events.
 *   **Time Tracking:** `StateUnit` tracks the time elapsed since it became active (`DeltaTimeSinceStart`).
 *   **Sub-States / Hierarchical States:** `StateUnit` can host its own `StateGraph` for complex, nested state logic.
 *   **EventBus Integration:** Trigger transitions based on events from `Nopnag.EventBusLib`.
@@ -200,15 +209,20 @@ StateGraph mainGraph = stateMachine.CreateGraph();
 StateUnit combatState = mainGraph.CreateState();
 StateUnit patrollingState = mainGraph.CreateState();
 
-// Create a subgraph for detailed combat logic
-StateGraph combatSubgraph = new StateGraph(); 
-StateUnit aimingState = combatSubgraph.CreateState();
-StateUnit shootingState = combatSubgraph.CreateState();
-// ... define transitions within combatSubgraph ...
+// Method 1: Create subgraph directly (Recommended for simple cases)
+StateGraph combatSubgraph = combatState.GetSubStateGraph(); // Automatically gets LocalEventBus support
 
-// Assign the subgraph to the parent state
-combatState.SetSubStateGraph(combatSubgraph);
-// Or: combatState.GetSubStateGraph() returns a new graph and assigns it
+// Method 2: Create subgraph elsewhere and attach (Flexible approach)
+StateGraph detailedCombatGraph = new StateGraph(); // Created independently
+StateUnit aimingState = detailedCombatGraph.CreateState();
+StateUnit shootingState = detailedCombatGraph.CreateState();
+// ... define transitions within detailedCombatGraph ...
+combatState.SetSubStateGraph(detailedCombatGraph); // Automatically gets LocalEventBus support when attached
+
+// Method 3: Manual StateMachine reference (Advanced usage)
+StateGraph manualGraph = new StateGraph();
+manualGraph.SetParentStateMachine(stateMachine); // Explicit LocalEventBus support
+// ... setup states and transitions ...
 
 // Define transition into the combat state using the fluent API
 // (patrollingState > combatState).On<EnemyDetectedEvent>(); // Example using Fluent API
@@ -221,6 +235,7 @@ stateMachine.Start();
 // 1. combatState.OnEnter runs.
 // 2. combatSubgraph.EnterGraph() runs, starting its initial state (e.g., aimingState).
 // 3. While combatState is active, combatSubgraph is updated via combatState's Update/FixedUpdate/LateUpdate.
+// 4. All subgraphs have access to the same LocalEventBus as the parent StateMachine.
 ```
 
 ### Time-Based Callbacks within States

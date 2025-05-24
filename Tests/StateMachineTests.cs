@@ -93,14 +93,14 @@ namespace Nopnag.StateMachineLib.Tests
       _stateMachine.Start(); // Enters _state1
       yield return null;
 
-      Assert.AreEqual("State1", _graphA.GetCurrentStateName());
+      Assert.AreEqual(_state1, _graphA.CurrentUnit);
       Assert.IsFalse(_state2Entered);
 
       EventBus<TestEventA>.Raise(new TestEventA());
       _stateMachine.UpdateMachine(); // Process event-based AnyState transition
       yield return null;
 
-      Assert.AreEqual("State2", _graphA.GetCurrentStateName(),
+      Assert.AreEqual(_state2, _graphA.CurrentUnit,
         "Did not transition to State2 on TestEventA via AnyState.");
       Assert.IsTrue(_state1Exited, "State1 should have exited.");
       Assert.IsTrue(_state2Entered, "State2 should have entered.");
@@ -120,7 +120,7 @@ namespace Nopnag.StateMachineLib.Tests
       _stateMachine
         .UpdateMachine(); // Ensure Now() transition completes if it needs an update cycle
       yield return null;
-      Assert.AreEqual("State2", _graphA.GetCurrentStateName(),
+      Assert.AreEqual(_state2, _graphA.CurrentUnit,
         "Should be in State2 initially for this part.");
       Assert.IsFalse(_state3Entered);
 
@@ -128,7 +128,7 @@ namespace Nopnag.StateMachineLib.Tests
       _stateMachine.UpdateMachine();
       yield return null;
 
-      Assert.AreEqual("State3", _graphA.GetCurrentStateName(),
+      Assert.AreEqual(_state3, _graphA.CurrentUnit,
         "Did not transition to State3 from State2 on TestEventA via AnyState.");
       Assert.IsTrue(_state2Exited, "State2 should have exited.");
       Assert.IsTrue(_state3Entered, "State3 should have entered.");
@@ -149,7 +149,7 @@ namespace Nopnag.StateMachineLib.Tests
       EventBus<TestDamageEvent>.Raise(new TestDamageEvent());
       _stateMachine.UpdateMachine();
       yield return null;
-      Assert.AreEqual("State1", _graphA.GetCurrentStateName(),
+      Assert.AreEqual(_state1, _graphA.CurrentUnit,
         "Should not transition if predicate is false.");
       Assert.IsFalse(_stunnedEntered);
 
@@ -158,7 +158,7 @@ namespace Nopnag.StateMachineLib.Tests
       EventBus<TestDamageEvent>.Raise(new TestDamageEvent());
       _stateMachine.UpdateMachine();
       yield return null;
-      Assert.AreEqual("StunnedState", _graphA.GetCurrentStateName(),
+      Assert.AreEqual(_stunnedState, _graphA.CurrentUnit,
         "Should transition to StunnedState if predicate is true.");
       Assert.IsTrue(_state1Exited);
       Assert.IsTrue(_stunnedEntered);
@@ -176,7 +176,7 @@ namespace Nopnag.StateMachineLib.Tests
       _graphA.InitialUnit = _state1;
       _stateMachine.Start();
       yield return null;
-      Assert.AreEqual("State1", _graphA.GetCurrentStateName());
+      Assert.AreEqual(_state1, _graphA.CurrentUnit);
 
       // Wrong param, should not transition
       var evtWrong = new TestEventWithParam();
@@ -184,7 +184,7 @@ namespace Nopnag.StateMachineLib.Tests
       EventBus<TestEventWithParam>.Raise(evtWrong);
       _stateMachine.UpdateMachine();
       yield return null;
-      Assert.AreEqual("State1", _graphA.GetCurrentStateName(),
+      Assert.AreEqual(_state1, _graphA.CurrentUnit,
         "S1->S2 Query: Transitioned on wrong param.");
       Assert.IsFalse(_state2Entered);
 
@@ -194,7 +194,7 @@ namespace Nopnag.StateMachineLib.Tests
       EventBus<TestEventWithParam>.Raise(evtCorrect);
       _stateMachine.UpdateMachine();
       yield return null;
-      Assert.AreEqual("State2", _graphA.GetCurrentStateName(),
+      Assert.AreEqual(_state2, _graphA.CurrentUnit,
         "S1->S2 Query: Did not transition on correct param.");
       Assert.IsTrue(_state1Exited);
       Assert.IsTrue(_state2Entered);
@@ -213,7 +213,7 @@ namespace Nopnag.StateMachineLib.Tests
       _stateMachine.Start();
       _stateMachine.UpdateMachine();
       yield return null;
-      Assert.AreEqual("State2", _graphA.GetCurrentStateName(),
+      Assert.AreEqual(_state2, _graphA.CurrentUnit,
         "Setup S2->S3 Query: Should be in State2.");
       _state1Exited = _state2Exited = _state3Entered = false;
 
@@ -223,7 +223,7 @@ namespace Nopnag.StateMachineLib.Tests
       EventBus<TestEventWithParam>.Raise(evtCorrectForS3);
       _stateMachine.UpdateMachine();
       yield return null;
-      Assert.AreEqual("State3", _graphA.GetCurrentStateName(),
+      Assert.AreEqual(_state3, _graphA.CurrentUnit,
         "S2->S3 Query: Did not transition on correct param from State2.");
       Assert.IsTrue(_state2Exited);
       Assert.IsTrue(_state3Entered);
@@ -241,7 +241,7 @@ namespace Nopnag.StateMachineLib.Tests
       _graphA.InitialUnit = _state1;
       _stateMachine.Start();
       yield return null;
-      Assert.AreEqual("State1", _graphA.GetCurrentStateName());
+      Assert.AreEqual(_state1, _graphA.CurrentUnit);
 
       // Correct param, predicate false
       allowTransitionPredicate = false;
@@ -250,7 +250,7 @@ namespace Nopnag.StateMachineLib.Tests
       EventBus<TestEventWithParam>.Raise(evtCorrectParam);
       _stateMachine.UpdateMachine();
       yield return null;
-      Assert.AreEqual("State1", _graphA.GetCurrentStateName(),
+      Assert.AreEqual(_state1, _graphA.CurrentUnit,
         "Query+Predicate: Transitioned with predicate false.");
       Assert.IsFalse(_stunnedEntered);
 
@@ -259,7 +259,7 @@ namespace Nopnag.StateMachineLib.Tests
       EventBus<TestEventWithParam>.Raise(evtCorrectParam); // Raise same event again
       _stateMachine.UpdateMachine();
       yield return null;
-      Assert.AreEqual("StunnedState", _graphA.GetCurrentStateName(),
+      Assert.AreEqual(_stunnedState, _graphA.CurrentUnit,
         "Query+Predicate: Did not transition with predicate true.");
       Assert.IsTrue(_state1Exited);
       Assert.IsTrue(_stunnedEntered);
@@ -280,7 +280,7 @@ namespace Nopnag.StateMachineLib.Tests
       _stateMachine.Start();
       _stateMachine.UpdateMachine();
       yield return null;
-      Assert.AreEqual("State2", _graphA.GetCurrentStateName(),
+      Assert.AreEqual(_state2, _graphA.CurrentUnit,
         "Setup S2->S4 Query+Predicate: Should be in State2.");
       _state1Exited = _state2Exited = _state4Entered = false; // Reset flags for S4
 
@@ -291,7 +291,7 @@ namespace Nopnag.StateMachineLib.Tests
       EventBus<TestEventWithParam>.Raise(evtCorrectForS4);
       _stateMachine.UpdateMachine();
       yield return null;
-      Assert.AreEqual("State4", _graphA.GetCurrentStateName(),
+      Assert.AreEqual(_state4, _graphA.CurrentUnit,
         "S2->S4 Query+Predicate: Did not transition from State2 with predicate true.");
       Assert.IsTrue(_state2Exited);
       Assert.IsTrue(_state4Entered);
@@ -311,7 +311,7 @@ namespace Nopnag.StateMachineLib.Tests
       _stateMachine.Start(); // Enters _state1
       yield return null;
 
-      Assert.AreEqual("State1", _graphA.GetCurrentStateName());
+      Assert.AreEqual(_state1, _graphA.CurrentUnit);
       Assert.IsTrue(_state1Entered);
       Assert.IsFalse(_state3Entered);
 
@@ -320,7 +320,7 @@ namespace Nopnag.StateMachineLib.Tests
       _stateMachine.UpdateMachine(); // Should check AnyState first
       yield return null;
 
-      Assert.AreEqual("State3", _graphA.GetCurrentStateName(),
+      Assert.AreEqual(_state3, _graphA.CurrentUnit,
         "AnyState transition should have priority and moved to State3.");
       Assert.IsTrue(_state1Exited, "State1 should have exited due to AnyState transition.");
       Assert.IsTrue(_state3Entered, "State3 should have been entered via AnyState transition.");
@@ -339,13 +339,13 @@ namespace Nopnag.StateMachineLib.Tests
       _graphA.InitialUnit = _state1;
       _stateMachine.Start();
       yield return null;
-      Assert.AreEqual("State1", _graphA.GetCurrentStateName());
+      Assert.AreEqual(_state1, _graphA.CurrentUnit);
 
       yield return new WaitForSeconds(0.15f); // Allow time for local transition
       _stateMachine.UpdateMachine();
       yield return null;
 
-      Assert.AreEqual("State2", _graphA.GetCurrentStateName(),
+      Assert.AreEqual(_state2, _graphA.CurrentUnit,
         "Local transition from State1 to State2 should have occurred.");
       Assert.IsTrue(_state1Exited);
       Assert.IsTrue(_state2Entered);
@@ -360,7 +360,7 @@ namespace Nopnag.StateMachineLib.Tests
       BasicTransition.Connect(_state1, _state2, elapsedTime => elapsedTime >= transitionTime);
 
       _stateMachine.Start();
-      Assert.AreEqual("State1", _graphA.GetCurrentStateName());
+      Assert.AreEqual(_state1, _graphA.CurrentUnit);
       yield return null; // Let initial Enter run
 
       // Wait slightly longer than the required transition time
@@ -370,7 +370,7 @@ namespace Nopnag.StateMachineLib.Tests
       _stateMachine.UpdateMachine();
       yield return null; // Allow Enter/Exit logic of the new state to run
 
-      Assert.AreEqual("State2", _graphA.GetCurrentStateName(),
+      Assert.AreEqual(_state2, _graphA.CurrentUnit,
         "Did not transition to State2 after waiting.");
       Assert.IsTrue(_state1Exited, "State1 did not exit after transition.");
       Assert.IsTrue(_state2Entered, "State2 did not enter after transition.");
@@ -391,12 +391,12 @@ namespace Nopnag.StateMachineLib.Tests
 
       _stateMachine.Start();
       yield return null;
-      Assert.AreEqual("State1", _graphA.GetCurrentStateName());
+      Assert.AreEqual(_state1, _graphA.CurrentUnit);
 
       conditionForS2 = true;
       _stateMachine.UpdateMachine();
       yield return null;
-      Assert.AreEqual("State2", _graphA.GetCurrentStateName(), "Did not transition to State2");
+      Assert.AreEqual(_state2, _graphA.CurrentUnit, "Did not transition to State2");
       Assert.IsTrue(_state1Exited);
       Assert.IsTrue(_state2Entered);
 
@@ -409,9 +409,12 @@ namespace Nopnag.StateMachineLib.Tests
       _state1Exited       = false;   // Reset flags
       _state2Exited       = false;
       _state3Entered      = false;
+
       _stateMachine.Start();
       yield return null;
-      Assert.AreEqual("State3", _graphA.GetCurrentStateName(), "Did not transition to State3");
+      _stateMachine.UpdateMachine(); // Need to update to trigger conditional transition
+      yield return null;
+      Assert.AreEqual(_state3, _graphA.CurrentUnit, "Did not transition to State3");
       Assert.IsTrue(_state1Exited);
       Assert.IsTrue(_state3Entered);
     }
@@ -425,12 +428,12 @@ namespace Nopnag.StateMachineLib.Tests
 
       _stateMachine.Start();
       yield return null;
-      Assert.AreEqual("State1", _graphA.GetCurrentStateName());
+      Assert.AreEqual(_state1, _graphA.CurrentUnit);
 
       targetIndex = 0; // Target State2
       _stateMachine.UpdateMachine();
       yield return null;
-      Assert.AreEqual("State2", _graphA.GetCurrentStateName(),
+      Assert.AreEqual(_state2, _graphA.CurrentUnit,
         "Did not transition to State2 by index 0.");
       Assert.IsTrue(_state1Exited);
       Assert.IsTrue(_state2Entered);
@@ -445,12 +448,12 @@ namespace Nopnag.StateMachineLib.Tests
       _state3Entered      = false;
       _stateMachine.Start();
       yield return null;
-      Assert.AreEqual("State1", _graphA.GetCurrentStateName());
+      Assert.AreEqual(_state1, _graphA.CurrentUnit);
 
       targetIndex = 1; // Target State3
       _stateMachine.UpdateMachine();
       yield return null;
-      Assert.AreEqual("State3", _graphA.GetCurrentStateName(),
+      Assert.AreEqual(_state3, _graphA.CurrentUnit,
         "Did not transition to State3 by index 1.");
       Assert.IsTrue(_state1Exited);
       Assert.IsTrue(_state3Entered);
@@ -464,7 +467,7 @@ namespace Nopnag.StateMachineLib.Tests
       _stateMachine.Start(); // Start should trigger Enter and immediate transition check
       yield return null;     // Wait frame for transition
 
-      Assert.AreEqual("State2", _graphA.GetCurrentStateName(), "Did not transition immediately.");
+      Assert.AreEqual(_state2, _graphA.CurrentUnit, "Did not transition immediately.");
       Assert.IsTrue(_state1Exited);
       Assert.IsTrue(_state2Entered);
     }
@@ -800,7 +803,7 @@ namespace Nopnag.StateMachineLib.Tests
       Assert.IsTrue(_state1Entered, "Initial state (State1) did not enter.");
       Assert.IsFalse(_state1Exited, "Initial state (State1) exited prematurely.");
       Assert.IsFalse(_state2Entered, "State2 should not have entered.");
-      Assert.AreEqual("State1", _graphA.GetCurrentStateName());
+      Assert.AreEqual(_state1, _graphA.CurrentUnit);
     }
 
     // --- Tests for New API --- 
@@ -820,7 +823,7 @@ namespace Nopnag.StateMachineLib.Tests
       Assert.IsTrue(s1Entered,
         "Initial state (s1) created with CreateState() did not enter using OnEnter.");
       Assert.IsTrue(graph.IsUnitActive(s1), "s1 should be active.");
-      // Assert.IsNull(graph.GetCurrentStateName(), "GetCurrentStateName should be null for states created with CreateState()."); 
+      // Assert.IsNull(graph.CurrentUnit, "GetCurrentStateName should be null for states created with CreateState()."); 
       // GetCurrentStateName will return the name of _currentUnit from _graphA if _graphA was also started.
       // To test GetCurrentStateName accurately for this new graph, we might need to ensure only this graph is present or active.
       // For now, let's focus on IsUnitActive and the OnEnter flag.
@@ -977,12 +980,16 @@ namespace Nopnag.StateMachineLib.Tests
     public IEnumerator ParallelGraphs_UpdateIndependently()
     {
       _graphB = _stateMachine.CreateGraph(); // Create second parallel graph
-      var  graphBState1   = _graphB.CreateUnit("GraphB_State1");
-      var  graphBState2   = _graphB.CreateUnit("GraphB_State2");
+      var  graphBState1   = _graphB.CreateState();
+      var  graphBState2   = _graphB.CreateState();
       bool graphB1Entered = false, graphB2Entered = false;
 
-      graphBState1.EnterStateFunction = () => graphB1Entered = true;
-      graphBState2.EnterStateFunction = () => graphB2Entered = true;
+      graphBState1.OnEnter = () => graphB1Entered = true;
+      graphBState2.OnEnter = () => graphB2Entered = true;
+
+      // Set initial states for both graphs
+      _graphA.InitialUnit = _state1;
+      _graphB.InitialUnit = graphBState1;
 
       // Transition in Graph A
       BasicTransition.Connect(_state1, _state2, elapsedTime => elapsedTime > 0.05f);
@@ -993,21 +1000,21 @@ namespace Nopnag.StateMachineLib.Tests
       yield return null;
       Assert.IsTrue(_state1Entered, "GraphA initial state did not enter.");
       Assert.IsTrue(graphB1Entered, "GraphB initial state did not enter.");
-      Assert.AreEqual("State1", _graphA.GetCurrentStateName());
-      Assert.AreEqual("GraphB_State1", _graphB.GetCurrentStateName());
+      Assert.AreEqual(_state1, _graphA.CurrentUnit);
+      Assert.AreEqual(graphBState1, _graphB.CurrentUnit);
 
       yield return new WaitForSeconds(0.08f); // Time for GraphA transition only
       _stateMachine.UpdateMachine();
       yield return null;
-      Assert.AreEqual("State2", _graphA.GetCurrentStateName(), "GraphA did not transition.");
-      Assert.AreEqual("GraphB_State1", _graphB.GetCurrentStateName(),
+      Assert.AreEqual(_state2, _graphA.CurrentUnit, "GraphA did not transition.");
+      Assert.AreEqual(graphBState1, _graphB.CurrentUnit,
         "GraphB transitioned too early.");
 
       yield return new WaitForSeconds(0.08f); // Time for GraphB transition
       _stateMachine.UpdateMachine();
       yield return null;
-      Assert.AreEqual("State2", _graphA.GetCurrentStateName());
-      Assert.AreEqual("GraphB_State2", _graphB.GetCurrentStateName(), "GraphB did not transition.");
+      Assert.AreEqual(_state2, _graphA.CurrentUnit);
+      Assert.AreEqual(graphBState2, _graphB.CurrentUnit, "GraphB did not transition.");
       Assert.IsTrue(graphB2Entered);
     }
 
@@ -1018,11 +1025,11 @@ namespace Nopnag.StateMachineLib.Tests
       _stateMachine = new StateMachine();
       _graphA       = _stateMachine.CreateGraph();
 
-      _state1       = _graphA.CreateUnit("State1");
-      _state2       = _graphA.CreateUnit("State2");
-      _state3       = _graphA.CreateUnit("State3");
-      _stunnedState = _graphA.CreateUnit("StunnedState");
-      _state4       = _graphA.CreateUnit("State4"); // Initialize _state4
+      _state1       = _graphA.CreateState();
+      _state2       = _graphA.CreateState();
+      _state3       = _graphA.CreateState();
+      _stunnedState = _graphA.CreateState();
+      _state4       = _graphA.CreateState();
 
       // Reset flags
       _state1Entered        = _state1Updated        = _state1Exited         = false;
@@ -1035,90 +1042,93 @@ namespace Nopnag.StateMachineLib.Tests
       _state1UpdateCount    = _state2UpdateCount = _state3UpdateCount = 0;
 
       // Assign basic functions to track calls
-      _state1.EnterStateFunction = () =>
+      _state1.OnEnter = () =>
       {
         _state1Entered = true;
         Debug.Log("State1 Enter");
       };
-      _state1.UpdateStateFunction = (dt) =>
+      _state1.OnUpdate = (dt) =>
       {
         _state1Updated    = true;
         _state1UpdateTime = dt;
         _state1UpdateCount++;
         Debug.Log($"State1 Update: {dt}");
       };
-      _state1.ExitStateFunction = () =>
+      _state1.OnExit = () =>
       {
         _state1Exited = true;
         Debug.Log("State1 Exit");
       };
 
-      _state2.EnterStateFunction = () =>
+      _state2.OnEnter = () =>
       {
         _state2Entered = true;
         Debug.Log("State2 Enter");
       };
-      _state2.UpdateStateFunction = (dt) =>
+      _state2.OnUpdate = (dt) =>
       {
         _state2Updated    = true;
         _state2UpdateTime = dt;
         _state2UpdateCount++;
         Debug.Log($"State2 Update: {dt}");
       };
-      _state2.ExitStateFunction = () =>
+      _state2.OnExit = () =>
       {
         _state2Exited = true;
         Debug.Log("State2 Exit");
       };
 
-      _state3.EnterStateFunction = () =>
+      _state3.OnEnter = () =>
       {
         _state3Entered = true;
         Debug.Log("State3 Enter");
       };
-      _state3.UpdateStateFunction = (dt) =>
+      _state3.OnUpdate = (dt) =>
       {
         _state3Updated    = true;
         _state3UpdateTime = dt;
         _state3UpdateCount++;
         Debug.Log($"State3 Update: {dt}");
       };
-      _state3.ExitStateFunction = () =>
+      _state3.OnExit = () =>
       {
         _state3Exited = true;
         Debug.Log("State3 Exit");
       };
 
-      _stunnedState.EnterStateFunction = () =>
+      _stunnedState.OnEnter = () =>
       {
         _stunnedEntered = true;
         Debug.Log("Stunned Enter");
       };
-      _stunnedState.UpdateStateFunction = (dt) =>
+      _stunnedState.OnUpdate = (dt) =>
       {
         _stunnedUpdated = true;
         Debug.Log($"Stunned Update: {dt}");
       };
-      _stunnedState.ExitStateFunction = () =>
+      _stunnedState.OnExit = () =>
       {
         _stunnedExited = true;
         Debug.Log("Stunned Exit");
       };
 
-      _state4.EnterStateFunction = () =>
+      _state4.OnEnter = () =>
       {
         _state4Entered = true;
         Debug.Log("State4 Enter");
       };
-      _state4.UpdateStateFunction = (dt) =>
+      _state4.OnUpdate = (dt) =>
       {
         Debug.Log($"State4 Update: {dt}");
       }; // Update flags can be added if needed by tests
-      _state4.ExitStateFunction = () =>
+      _state4.OnExit = () =>
       {
         _state4Exited = true;
         Debug.Log("State4 Exit");
       };
+
+      // Set initial state for the main graph
+      _graphA.InitialUnit = _state1;
 
       // Clear EventBus listeners (important for test isolation)
       // Note: A proper EventBus might need a ClearAllListeners method for robust testing.
@@ -1356,12 +1366,12 @@ namespace Nopnag.StateMachineLib.Tests
       TransitionByEvent.Connect<TestEventB>(_state2, _state1);
 
       EventBus<TestEventA>.Raise(new TestEventA()); // Trigger _state1 -> _state2
-      yield return null;        // Allow transition to complete
-      Assert.AreEqual("State2", _graphA.GetCurrentStateName());
+      yield return null;                            // Allow transition to complete
+      Assert.AreEqual(_state2, _graphA.CurrentUnit);
 
       EventBus<TestEventB>.Raise(new TestEventB()); // Trigger _state2 -> _state1 (re-enter _state1)
-      yield return null;              // Allow transition to complete
-      Assert.AreEqual("State1", _graphA.GetCurrentStateName());
+      yield return null;                            // Allow transition to complete
+      Assert.AreEqual(_state1, _graphA.CurrentUnit);
       Assert.IsFalse(atCallbackCalled,
         "At callback called immediately on re-enter without waiting.");
 
@@ -1439,12 +1449,12 @@ namespace Nopnag.StateMachineLib.Tests
       TransitionByEvent.Connect<TestEventB>(_state2, _state1);
 
       EventBus<TestEventA>.Raise(new TestEventA()); // _state1 -> _state2
-      yield return null;        // Allow transition to complete
-      Assert.AreEqual("State2", _graphA.GetCurrentStateName());
+      yield return null;                            // Allow transition to complete
+      Assert.AreEqual(_state2, _graphA.CurrentUnit);
 
       EventBus<TestEventB>.Raise(new TestEventB()); // _state2 -> _state1 (re-enter _state1)
-      yield return null;              // Allow transition to complete
-      Assert.AreEqual("State1", _graphA.GetCurrentStateName());
+      yield return null;                            // Allow transition to complete
+      Assert.AreEqual(_state1, _graphA.CurrentUnit);
       Assert.AreEqual(0, atEveryCallbackCount,
         "AtEvery called immediately on re-enter without waiting.");
 
@@ -1523,7 +1533,7 @@ namespace Nopnag.StateMachineLib.Tests
 
       // Transition to state2
       DirectTransition.Connect(_state1, _state2);
-      _state1.ExitStateFunction = () => { };
+      _state1.OnExit = () => { };
       _stateMachine.UpdateMachine();
       yield return null;
       called = false;
@@ -1557,7 +1567,7 @@ namespace Nopnag.StateMachineLib.Tests
       Assert.IsTrue(called, "Listener should be called for correct param while active");
       // Transition to state2
       DirectTransition.Connect(_state1, _state2);
-      _state1.ExitStateFunction = () => { };
+      _state1.OnExit = () => { };
       _stateMachine.UpdateMachine();
       yield return null;
       called = false;
@@ -1573,16 +1583,19 @@ namespace Nopnag.StateMachineLib.Tests
     [UnityTest]
     public IEnumerator Subgraph_LifecycleIsCorrect()
     {
-      var  subGraph    = _state1.GetSubStateGraph(); // Create and assign subgraph
-      var  subStateA   = subGraph.CreateUnit("SubA");
-      var  subStateB   = subGraph.CreateUnit("SubB");
+      var  subGraph    = _state1.CreateGraph(); // Use new IGraphHost API
+      var  subStateA   = subGraph.CreateState();
+      var  subStateB   = subGraph.CreateState();
       bool subAEntered = false, subAUpdated = false, subAExited = false;
       var  subBEntered = false;
 
-      subStateA.EnterStateFunction  = () => subAEntered   = true;
-      subStateA.UpdateStateFunction = (dt) => subAUpdated = true;
-      subStateA.ExitStateFunction   = () => subAExited    = true;
-      subStateB.EnterStateFunction  = () => subBEntered   = true;
+      subStateA.OnEnter  = () => subAEntered   = true;
+      subStateA.OnUpdate = (dt) => subAUpdated = true;
+      subStateA.OnExit   = () => subAExited    = true;
+      subStateB.OnEnter  = () => subBEntered   = true;
+
+      // Set initial state for subgraph
+      subGraph.InitialUnit = subStateA;
 
       // Transition within subgraph
       BasicTransition.Connect(subStateA, subStateB, elapsedTime => elapsedTime > 0.05f);
@@ -1599,7 +1612,7 @@ namespace Nopnag.StateMachineLib.Tests
       yield return null;
       Assert.IsTrue(subAExited, "SubA did not exit.");
       Assert.IsTrue(subBEntered, "SubB did not enter.");
-      Assert.AreEqual("State1", _graphA.GetCurrentStateName()); // Still in main state1
+      Assert.AreEqual(_state1, _graphA.CurrentUnit); // Still in main state1
 
       yield return new WaitForSeconds(0.1f); // Time for main transition
       _stateMachine.UpdateMachine();         // Trigger main transition
@@ -1607,7 +1620,7 @@ namespace Nopnag.StateMachineLib.Tests
       Assert.IsTrue(_state1Exited, "State1 (with subgraph) did not exit.");
       // Check if subgraph exit was triggered (might need explicit subgraph exit logic check if StateUnit.Exit handles it)
       Assert.IsTrue(_state2Entered, "State2 did not enter after subgraph state exited.");
-      Assert.AreEqual("State2", _graphA.GetCurrentStateName());
+      Assert.AreEqual(_state2, _graphA.CurrentUnit);
     }
 
     [TearDown]
@@ -1629,12 +1642,12 @@ namespace Nopnag.StateMachineLib.Tests
 
       _stateMachine.Start();
       yield return null;
-      Assert.AreEqual("State1", _graphA.GetCurrentStateName());
+      Assert.AreEqual(_state1, _graphA.CurrentUnit);
 
       EventBus<TestDamageEvent>.Raise(new TestDamageEvent());
       yield return null; // Wait for state change
 
-      Assert.AreEqual("StunnedState", _graphA.GetCurrentStateName(),
+      Assert.AreEqual(_stunnedState, _graphA.CurrentUnit,
         "Did not transition to StunnedState on damage event.");
       Assert.IsTrue(_state1Exited);
       Assert.IsTrue(_stunnedEntered);
@@ -1644,7 +1657,7 @@ namespace Nopnag.StateMachineLib.Tests
       _stateMachine.UpdateMachine(); // Trigger transition out of stun
       yield return null;
 
-      Assert.AreEqual("State1", _graphA.GetCurrentStateName(),
+      Assert.AreEqual(_state1, _graphA.CurrentUnit,
         "Did not transition back to State1 after stun duration.");
       Assert.IsTrue(_stunnedExited);
       // state1Entered should be true again if it resets on enter, check Setup/Teardown logic
@@ -1657,7 +1670,7 @@ namespace Nopnag.StateMachineLib.Tests
       var param1       = new CustomParam();
       var param2       = new CustomParam();
       var transitioned = false;
-      _state1.ExitStateFunction = () => transitioned = true;
+      _state1.OnExit = () => transitioned = true;
 
       // EventQuery: only match events with param1
       var query = EventBus<TestEventA>.Where<CustomParam>(param1);
@@ -1665,14 +1678,14 @@ namespace Nopnag.StateMachineLib.Tests
 
       _stateMachine.Start();
       yield return null;
-      Assert.AreEqual("State1", _graphA.GetCurrentStateName());
+      Assert.AreEqual(_state1, _graphA.CurrentUnit);
 
       // Raise event with param2 (should NOT transition)
       var evtWrong = new TestEventA();
       evtWrong.Set<CustomParam>(param2);
       EventBus<TestEventA>.Raise(evtWrong);
       yield return null;
-      Assert.AreEqual("State1", _graphA.GetCurrentStateName());
+      Assert.AreEqual(_state1, _graphA.CurrentUnit);
       Assert.IsFalse(transitioned, "Transitioned on wrong parameter!");
 
       // Raise event with param1 (should transition)
@@ -1680,7 +1693,7 @@ namespace Nopnag.StateMachineLib.Tests
       evtRight.Set<CustomParam>(param1);
       EventBus<TestEventA>.Raise(evtRight);
       yield return null;
-      Assert.AreEqual("State2", _graphA.GetCurrentStateName());
+      Assert.AreEqual(_state2, _graphA.CurrentUnit);
       Assert.IsTrue(transitioned, "Did not transition on correct parameter!");
     }
 
@@ -1692,7 +1705,7 @@ namespace Nopnag.StateMachineLib.Tests
       var param1       = new CustomParam();
       var param2       = new CustomParam();
       var transitioned = false;
-      _state1.ExitStateFunction = () => transitioned = true;
+      _state1.OnExit = () => transitioned = true;
 
       // Predicate: only allow transition if event's AllowTransition property is true
       Func<TestEventWithFlag, bool> predicate = evt => evt.AllowTransition;
@@ -1703,14 +1716,14 @@ namespace Nopnag.StateMachineLib.Tests
 
       _stateMachine.Start();
       yield return null;
-      Assert.AreEqual("State1", _graphA.GetCurrentStateName());
+      Assert.AreEqual(_state1, _graphA.CurrentUnit);
 
       // Raise event with param2 (should NOT transition)
       var evtWrongParam = new TestEventWithFlag { AllowTransition = true };
       evtWrongParam.Set<CustomParam>(param2);
       EventBus<TestEventWithFlag>.Raise(evtWrongParam);
       yield return null;
-      Assert.AreEqual("State1", _graphA.GetCurrentStateName());
+      Assert.AreEqual(_state1, _graphA.CurrentUnit);
       Assert.IsFalse(transitioned, "Transitioned on wrong parameter!");
 
       // Raise event with param1 but predicate false (should NOT transition)
@@ -1718,7 +1731,7 @@ namespace Nopnag.StateMachineLib.Tests
       evtWrongPredicate.Set<CustomParam>(param1);
       EventBus<TestEventWithFlag>.Raise(evtWrongPredicate);
       yield return null;
-      Assert.AreEqual("State1", _graphA.GetCurrentStateName());
+      Assert.AreEqual(_state1, _graphA.CurrentUnit);
       Assert.IsFalse(transitioned, "Transitioned when predicate was false!");
 
       // Raise event with param1 and predicate true (should transition)
@@ -1726,7 +1739,7 @@ namespace Nopnag.StateMachineLib.Tests
       evtRight.Set<CustomParam>(param1);
       EventBus<TestEventWithFlag>.Raise(evtRight);
       yield return null;
-      Assert.AreEqual("State2", _graphA.GetCurrentStateName());
+      Assert.AreEqual(_state2, _graphA.CurrentUnit);
       Assert.IsTrue(transitioned, "Did not transition on correct parameter and predicate!");
     }
 
@@ -1737,13 +1750,13 @@ namespace Nopnag.StateMachineLib.Tests
       TransitionByEvent.Connect<TestEventB>(_state1, _state2, evt => allowTransition);
       _stateMachine.Start();
       yield return null;
-      Assert.AreEqual("State1", _graphA.GetCurrentStateName());
+      Assert.AreEqual(_state1, _graphA.CurrentUnit);
 
       // Raise when predicate is false
       allowTransition = false;
       EventBus<TestEventB>.Raise(new TestEventB());
       yield return null;
-      Assert.AreEqual("State1", _graphA.GetCurrentStateName(),
+      Assert.AreEqual(_state1, _graphA.CurrentUnit,
         "Transitioned when predicate was false.");
 
       // Raise when predicate is true
@@ -1751,7 +1764,7 @@ namespace Nopnag.StateMachineLib.Tests
       EventBus<TestEventB>.Raise(new TestEventB());
       yield return null; // Wait for state change
 
-      Assert.AreEqual("State2", _graphA.GetCurrentStateName(),
+      Assert.AreEqual(_state2, _graphA.CurrentUnit,
         "Did not transition when predicate was true.");
       Assert.IsTrue(_state1Exited);
       Assert.IsTrue(_state2Entered);
@@ -1763,12 +1776,12 @@ namespace Nopnag.StateMachineLib.Tests
       TransitionByEvent.Connect<TestEventA>(_state1, _state2);
       _stateMachine.Start();
       yield return null;
-      Assert.AreEqual("State1", _graphA.GetCurrentStateName());
+      Assert.AreEqual(_state1, _graphA.CurrentUnit);
 
       EventBus<TestEventA>.Raise(new TestEventA());
       yield return null; // Wait for state change
 
-      Assert.AreEqual("State2", _graphA.GetCurrentStateName(),
+      Assert.AreEqual(_state2, _graphA.CurrentUnit,
         "Did not transition on Event raise.");
       Assert.IsTrue(_state1Exited);
       Assert.IsTrue(_state2Entered);
@@ -1882,7 +1895,7 @@ namespace Nopnag.StateMachineLib.Tests
 
       Assert.Throws<ObjectDisposedException>(() =>
       {
-        graph.GetCurrentStateName(); // This graph belongs to the disposed SM
+        var _ = graph.CurrentUnit; // This graph belongs to the disposed SM
       }, "EventDrivenTransition_AfterDispose: Accessing graph of disposed SM should throw.");
 
       // Optionally, check that a specific listener was not called if we had one, 

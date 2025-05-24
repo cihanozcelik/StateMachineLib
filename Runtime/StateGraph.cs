@@ -13,7 +13,7 @@ using UnityEngine;
 
 namespace Nopnag.StateMachineLib
 {
-  public class StateGraph
+  public class StateGraph : IGraphHost
   {
     public static readonly AnyStateMarker
       Any = new(); // Using without explicit namespace as it's now in Nopnag.StateMachineLib
@@ -25,14 +25,37 @@ namespace Nopnag.StateMachineLib
     public static readonly DynamicTargetMarker DynamicTarget = new();
 
     public StateUnit InitialUnit;
+    
+    // IGraphHost implementation
+    private readonly GraphHost _graphHost;
+    public IReadOnlyList<StateGraph> HostedGraphs => _graphHost.HostedGraphs;
+    internal LocalEventBus LocalEventBus => _graphHost.LocalEventBus;
+    LocalEventBus IGraphHost.LocalEventBus => LocalEventBus;
 
     const    int MAX_STATE_CHANGES_PER_UPDATE = 10; // Safety break for chained transitions
     readonly List<IStateTransition> _anyStateTransitions = new();
     List<IIListener> _graphEventTransitionListeners = new();
-    bool _isDisposedByParent = false; // New flag
+    bool _isDisposedByParent = false;
     readonly List<StateUnit> _units = new();
-    public   StateUnit CurrentUnit { get; private set; }
-    public   bool IsGraphActive { get; private set; } // Made setter private
+    StateUnit _currentUnit;
+    public StateUnit CurrentUnit 
+    { 
+      get 
+      {
+        if (_isDisposedByParent) throw new ObjectDisposedException(nameof(StateGraph));
+        return _currentUnit;
+      }
+      internal set 
+      {
+        _currentUnit = value;
+      }
+    }
+    public   bool IsGraphActive { get; private set; }
+
+    public StateGraph()
+    {
+      _graphHost = new GraphHost();
+    }
 
     public StateUnit CreateState()
     {
@@ -233,8 +256,22 @@ namespace Nopnag.StateMachineLib
       _isDisposedByParent = true;
       // Optionally, also ensure IsGraphActive is false and CurrentUnit is null if not already handled by ExitGraph
       IsGraphActive = false;
-      CurrentUnit   = null;
+      _currentUnit = null; // Set directly to avoid dispose check
       ClearSubscriptions();
     }
+
+    // IGraphHost implementation
+    public void LocalRaise<T>(T busEvent) where T : BusEvent
+    {
+      if (_isDisposedByParent) throw new ObjectDisposedException(nameof(StateGraph));
+      _graphHost.LocalRaise(busEvent);
+    }
+    
+    public void AttachGraph(StateGraph graph) => _graphHost.AttachGraph(graph);
+    public void DetachGraph(StateGraph graph) => _graphHost.DetachGraph(graph);
+    public void UpdateAllGraphs() => _graphHost.UpdateAllGraphs();
+    public void FixedUpdateAllGraphs() => _graphHost.FixedUpdateAllGraphs();
+    public void LateUpdateAllGraphs() => _graphHost.LateUpdateAllGraphs();
+    public StateGraph CreateGraph() => _graphHost.CreateGraph();
   }
 }

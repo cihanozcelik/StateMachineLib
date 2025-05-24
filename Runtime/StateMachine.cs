@@ -1,43 +1,53 @@
 using System;
 using System.Collections.Generic;
+using Nopnag.EventBusLib;
 
 namespace Nopnag.StateMachineLib
 {
-  public class StateMachine : IDisposable
+  public class StateMachine : IGraphHost, IDisposable
   {
-    public readonly List<StateGraph> GraphList   = new();
-    bool                             _isDisposed = false;
-    bool                             _isStarted  = false;
+    private readonly GraphHost _graphHost;
+    
+    bool _isDisposed = false;
+    bool _isStarted  = false;
+
+    public StateMachine()
+    {
+      _graphHost = new GraphHost();
+    }
+
+    // IGraphHost implementation via composition
+    public IReadOnlyList<StateGraph> HostedGraphs => _graphHost.HostedGraphs;
+    internal LocalEventBus LocalEventBus => _graphHost.LocalEventBus;
+    LocalEventBus IGraphHost.LocalEventBus => LocalEventBus;
+    
+    public void LocalRaise<T>(T busEvent) where T : BusEvent
+    {
+      if (_isDisposed) throw new ObjectDisposedException(nameof(StateMachine));
+      _graphHost.LocalRaise(busEvent);
+    }
+    
+    public void AttachGraph(StateGraph graph) => _graphHost.AttachGraph(graph);
+    public void DetachGraph(StateGraph graph) => _graphHost.DetachGraph(graph);
+    public void UpdateAllGraphs() => _graphHost.UpdateAllGraphs();
+    public void FixedUpdateAllGraphs() => _graphHost.FixedUpdateAllGraphs();
+    public void LateUpdateAllGraphs() => _graphHost.LateUpdateAllGraphs();
+    public StateGraph CreateGraph() => _graphHost.CreateGraph();
 
     public void Dispose()
     {
       if (_isDisposed) return;
 
-      // Exit all graphs and mark them as disposed internally first
-      for (var i = 0; i < GraphList.Count; i++)
-      {
-        GraphList[i].ExitGraph();      // Ensure listeners are unsubscribed etc.
-        GraphList[i].MarkAsDisposed(); // Mark the graph itself as unusable
-      }
-      // GraphList.Clear(); // Optionally clear the list after disposing graphs
-
-      _isStarted  = false; // Ensure StateMachine itself is also marked as not started
+      _graphHost.Dispose();
+      _isStarted  = false;
       _isDisposed = true;
-    }
-
-    public StateGraph CreateGraph()
-    {
-      if (_isDisposed) throw new ObjectDisposedException(nameof(StateMachine));
-      var stateGraph = new StateGraph();
-      GraphList.Add(stateGraph);
-      return stateGraph;
     }
 
     public void Exit()
     {
       if (_isDisposed) return;
 
-      for (var i = 0; i < GraphList.Count; i++) GraphList[i].ExitGraph();
+      _graphHost.ExitAllGraphs();
       _isStarted = false;
     }
 
@@ -45,21 +55,20 @@ namespace Nopnag.StateMachineLib
     {
       if (_isDisposed) throw new ObjectDisposedException(nameof(StateMachine));
       if (!_isStarted) Start();
-      for (var i = 0; i < GraphList.Count; i++) GraphList[i].FixedUpdateGraph();
+      FixedUpdateAllGraphs();
     }
 
     public void LateUpdateMachine()
     {
       if (_isDisposed) throw new ObjectDisposedException(nameof(StateMachine));
       if (!_isStarted) Start();
-      for (var i = 0; i < GraphList.Count; i++) GraphList[i].LateUpdateGraph();
+      LateUpdateAllGraphs();
     }
 
     public void RemoveGraph(StateGraph graph)
     {
       if (_isDisposed) throw new ObjectDisposedException(nameof(StateMachine));
-      graph.MarkAsDisposed();
-      GraphList.Remove(graph);
+      DetachGraph(graph);
     }
 
     public void Start()
@@ -67,7 +76,7 @@ namespace Nopnag.StateMachineLib
       if (_isDisposed) throw new ObjectDisposedException(nameof(StateMachine));
       if (!_isStarted)
       {
-        for (var i = 0; i < GraphList.Count; i++) GraphList[i].EnterGraph();
+        _graphHost.StartAllGraphs();
         _isStarted = true;
       }
     }
@@ -76,7 +85,7 @@ namespace Nopnag.StateMachineLib
     {
       if (_isDisposed) throw new ObjectDisposedException(nameof(StateMachine));
       if (!_isStarted) Start();
-      for (var i = 0; i < GraphList.Count; i++) GraphList[i].UpdateGraph();
+      UpdateAllGraphs();
     }
   }
 }
