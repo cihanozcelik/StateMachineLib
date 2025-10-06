@@ -1290,6 +1290,119 @@ namespace Nopnag.StateMachineLib.Tests
       Object.DestroyImmediate(go); // Cleanup
     }
 
+    [UnityTest]
+    public IEnumerator StateMachineWrapper_OnExit_AccessesDestroyedChildObject_ShouldNotThrowException()
+    {
+      ResetWrapperTestFlags();
+      
+      // Create parent GameObject with MonoBehaviour
+      var parentGO = new GameObject("ParentWithStateMachine");
+      var mb = parentGO.AddComponent<TestMonoBehaviourForWrapper>();
+      mb.enabled = true;
+
+      // Create child GameObject (sub-element)
+      var childGO = new GameObject("ChildElement");
+      childGO.transform.SetParent(parentGO.transform);
+      childGO.SetActive(false); // Initially inactive
+
+      // Create managed StateMachine
+      var sm = mb.CreateManagedStateMachine();
+      var graph = sm.CreateGraph();
+      var idleState = graph.CreateState();
+      graph.InitialUnit = idleState;
+
+      // Setup idle state to activate/deactivate child
+      idleState.OnEnter = () =>
+      {
+        Debug.Log("Idle OnEnter: Activating child");
+        _wrapperTest_StateEntered = true;
+        childGO.SetActive(true); // Activate child when entering idle
+      };
+
+      idleState.OnExit = () =>
+      {
+        Debug.Log("Idle OnExit: Attempting to deactivate child");
+        _wrapperTest_StateExited = true;
+        
+        // Real-world scenario: User doesn't use try-catch
+        // This WILL throw exception if childGO is already destroyed
+        childGO.SetActive(false); // Try to deactivate child when exiting idle
+        Debug.Log("Child deactivated successfully");
+      };
+
+      yield return null; // Frame 1: SM Starts, idle enters, child activates
+
+      Assert.IsTrue(_wrapperTest_StateEntered, "Idle state did not enter.");
+      Assert.IsTrue(childGO.activeSelf, "Child was not activated on idle enter.");
+
+      // Now destroy the parent (which destroys children first, then triggers wrapper cleanup)
+      // If execution order is: Destroy children → Destroy parent → Wrapper detects → Exit called
+      // Then childGO will be destroyed BEFORE OnExit is called = EXCEPTION
+      Object.DestroyImmediate(parentGO); // This destroys childGO first, then parentGO
+
+      yield return null; // Frame 2: Wrapper detects destruction and calls Exit
+
+      // The OnExit should have been called WITHOUT throwing exception
+      Assert.IsTrue(_wrapperTest_StateExited, "Idle state OnExit was not called.");
+      
+      // If we reach here without exception, the fix is working!
+      // If exception is thrown, Unity Test Framework will catch it and test will FAIL
+    }
+    
+    [UnityTest]
+    public IEnumerator StateMachineWrapper_OnExit_WithDestroyAsync_ExposesTimingIssue()
+    {
+      ResetWrapperTestFlags();
+      
+      // Create parent GameObject with MonoBehaviour
+      var parentGO = new GameObject("ParentWithStateMachine");
+      var mb = parentGO.AddComponent<TestMonoBehaviourForWrapper>();
+      mb.enabled = true;
+
+      // Create child GameObject (sub-element)
+      var childGO = new GameObject("ChildElement");
+      childGO.transform.SetParent(parentGO.transform);
+      childGO.SetActive(false); // Initially inactive
+
+      // Create managed StateMachine
+      var sm = mb.CreateManagedStateMachine();
+      var graph = sm.CreateGraph();
+      var idleState = graph.CreateState();
+      graph.InitialUnit = idleState;
+
+      // Setup idle state to activate/deactivate child
+      idleState.OnEnter = () =>
+      {
+        Debug.Log("Idle OnEnter: Activating child");
+        _wrapperTest_StateEntered = true;
+        childGO.SetActive(true);
+      };
+
+      idleState.OnExit = () =>
+      {
+        Debug.Log("Idle OnExit: Attempting to deactivate child");
+        _wrapperTest_StateExited = true;
+        
+        // Try to access child - this should be safe even if parent is being destroyed
+        childGO.SetActive(false);
+        Debug.Log("Child deactivated successfully");
+      };
+
+      yield return null; // Frame 1: SM Starts, idle enters, child activates
+
+      Assert.IsTrue(_wrapperTest_StateEntered, "Idle state did not enter.");
+      Assert.IsTrue(childGO.activeSelf, "Child was not activated on idle enter.");
+
+      // Use async Destroy instead of DestroyImmediate
+      // This might expose different timing issues
+      Object.Destroy(parentGO); // Async destroy - happens at end of frame
+      
+      yield return null; // Frame 2: Destruction happens, wrapper should detect and call Exit
+
+      // The OnExit should have been called WITHOUT throwing exception
+      Assert.IsTrue(_wrapperTest_StateExited, "Idle state OnExit was not called.");
+    }
+
     // ---- Tests for StateUnit At and AtEvery ----
 
     [UnityTest]

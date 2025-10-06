@@ -10,17 +10,18 @@ namespace Nopnag.StateMachineLib // Assuming StateMachine and StateMachineWrappe
         /// - The StateMachine will automatically receive Update, FixedUpdate, and LateUpdate calls.
         /// - It will automatically Start when the MonoBehaviour is active and updates begin.
         /// - It will pause updates if the MonoBehaviour is disabled.
-        /// - It will automatically call Exit() on the StateMachine when the MonoBehaviour is destroyed.
+        /// - It will automatically call Exit() on the StateMachine when the MonoBehaviour (or its GameObject) is destroyed.
+        /// - Multiple MonoBehaviours on the same GameObject can each have their own managed StateMachine.
         /// </summary>
         /// <param name="mb">The MonoBehaviour to link the StateMachine's lifecycle to.</param>
         /// <returns>A new StateMachine instance that is lifecycle-managed.</returns>
         public static StateMachine CreateManagedStateMachine(this MonoBehaviour mb)
         {
-            // StateMachineWrapper's constructor subscribes to ManualEventManager,
-            // which keeps the wrapper instance alive even if this local 'wrapper' variable goes out of scope.
-            // The wrapper will self-dispose when 'mb' is destroyed.
-            var wrapper = new StateMachineWrapper(mb);
-            return wrapper.StateMachine;
+            // Get or create the wrapper component on this GameObject
+            var wrapper = StateMachineWrapper.GetOrCreate(mb.gameObject);
+            
+            // Create and register a new StateMachine for this MonoBehaviour
+            return wrapper.CreateStateMachineFor(mb);
         }
     }
 } 
