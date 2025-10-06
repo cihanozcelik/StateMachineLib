@@ -1291,6 +1291,77 @@ namespace Nopnag.StateMachineLib.Tests
     }
 
     [UnityTest]
+    public IEnumerator StateMachineWrapper_MultipleComponents_IndependentEnableDisable()
+    {
+      ResetWrapperTestFlags();
+      
+      // Create GameObject with TWO MonoBehaviours
+      var go = new GameObject("TestMultipleComponents");
+      var mb1 = go.AddComponent<TestMonoBehaviourForWrapper>();
+      var mb2 = go.AddComponent<TestMonoBehaviourForWrapper>();
+      
+      mb1.enabled = true;
+      mb2.enabled = true;
+
+      // Create two separate StateMachines
+      var sm1 = mb1.CreateManagedStateMachine();
+      var sm2 = mb2.CreateManagedStateMachine();
+
+      var graph1 = sm1.CreateGraph();
+      var state1 = graph1.CreateState();
+      graph1.InitialUnit = state1;
+
+      var graph2 = sm2.CreateGraph();
+      var state2 = graph2.CreateState();
+      graph2.InitialUnit = state2;
+
+      // Track updates independently
+      int sm1UpdateCount = 0;
+      int sm2UpdateCount = 0;
+
+      state1.OnEnter = () => Debug.Log("SM1 State Entered");
+      state1.OnUpdate = _ => sm1UpdateCount++;
+
+      state2.OnEnter = () => Debug.Log("SM2 State Entered");
+      state2.OnUpdate = _ => sm2UpdateCount++;
+
+      yield return null; // Frame 1: Both start and update
+
+      Assert.AreEqual(1, sm1UpdateCount, "SM1 should have updated once");
+      Assert.AreEqual(1, sm2UpdateCount, "SM2 should have updated once");
+
+      // Disable ONLY mb1
+      mb1.enabled = false;
+      yield return null; // Frame 2: Only SM2 should update
+
+      Assert.AreEqual(1, sm1UpdateCount, "SM1 should NOT update (owner disabled)");
+      Assert.AreEqual(2, sm2UpdateCount, "SM2 should continue updating");
+
+      // Disable mb2 as well
+      mb2.enabled = false;
+      yield return null; // Frame 3: Neither should update
+
+      Assert.AreEqual(1, sm1UpdateCount, "SM1 should still be paused");
+      Assert.AreEqual(2, sm2UpdateCount, "SM2 should now be paused too");
+
+      // Re-enable mb1 only
+      mb1.enabled = true;
+      yield return null; // Frame 4: Only SM1 should resume
+
+      Assert.AreEqual(2, sm1UpdateCount, "SM1 should resume");
+      Assert.AreEqual(2, sm2UpdateCount, "SM2 should still be paused");
+
+      // Re-enable mb2
+      mb2.enabled = true;
+      yield return null; // Frame 5: Both should update
+
+      Assert.AreEqual(3, sm1UpdateCount, "SM1 should update");
+      Assert.AreEqual(3, sm2UpdateCount, "SM2 should resume");
+
+      Object.DestroyImmediate(go);
+    }
+
+    [UnityTest]
     public IEnumerator StateMachineWrapper_OnExit_AccessesDestroyedChildObject_ShouldNotThrowException()
     {
       ResetWrapperTestFlags();
