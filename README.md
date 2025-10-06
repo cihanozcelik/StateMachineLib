@@ -2,6 +2,16 @@
 
 A lightweight and flexible state machine library for C# and Unity, designed for managing game logic flow.
 
+## 🚀 Getting Started
+
+After cloning this repository, run the following command to set up git hooks:
+
+```bash
+.githooks/install.sh
+```
+
+This configures git to prevent direct pushes to the `main` branch. All changes must go through feature branches and pull requests.
+
 ## Overview
 
 StateMachineLib provides tools to structure application logic into distinct states and define transitions between them. It allows for multiple state graphs running concurrently, supports hierarchical state machines (subgraphs), dynamic graph attachment/detachment, and a local event system alongside global event integration.
