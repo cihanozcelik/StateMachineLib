@@ -9,6 +9,9 @@ public class StateMachineWrapper : MonoBehaviour
     // Dictionary: MonoBehaviour -> StateMachine mapping
     private Dictionary<MonoBehaviour, StateMachine> _managedStateMachines = new();
     
+    // Track if OnEnable was called (to differentiate first creation vs re-enable)
+    private bool _hasBeenDisabled = false;
+    
     /// <summary>
     /// Gets or creates the StateMachineWrapper component on the given GameObject.
     /// </summary>
@@ -61,16 +64,22 @@ public class StateMachineWrapper : MonoBehaviour
     
     void OnEnable()
     {
-        // When wrapper becomes enabled (GameObject active or component enabled)
-        // Turn on power for all managed state machines
-        UpdateAllStateMachinesPower(true);
+        // Only restore power if this is a re-enable (not first creation)
+        // This prevents interfering with StateMachine initialization
+        if (_hasBeenDisabled)
+        {
+            // Turn on power for all managed state machines
+            UpdateAllStateMachinesPower(turnOn: true);
+        }
     }
     
     void OnDisable()
     {
-        // When wrapper becomes disabled (GameObject inactive or component disabled)
+        // Mark that we've been disabled (so next OnEnable should restore power)
+        _hasBeenDisabled = true;
+        
         // Turn off power for all managed state machines (pause without Exit)
-        UpdateAllStateMachinesPower(false);
+        UpdateAllStateMachinesPower(turnOn: false);
     }
     
     void UpdateAllStateMachinesPower(bool turnOn)
