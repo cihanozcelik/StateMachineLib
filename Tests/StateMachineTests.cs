@@ -1508,6 +1508,74 @@ namespace Nopnag.StateMachineLib.Tests
     }
 
     [UnityTest]
+    public IEnumerator StateMachineWrapper_EventRaisedBeforeFirstUpdate_WorksCorrectly()
+    {
+      // This test verifies that events raised immediately after creating StateMachine
+      // (before first Update) work correctly after the lazy Start() happens
+      
+      ResetWrapperTestFlags();
+      
+      var go = new GameObject("TestEarlyEvent");
+      var mb = go.AddComponent<TestMonoBehaviourForWrapper>();
+      mb.enabled = true;
+
+      // Create managed StateMachine
+      var sm = mb.CreateManagedStateMachine();
+      var graph = sm.CreateGraph();
+      var state1 = graph.CreateState();
+      var state2 = graph.CreateState();
+      graph.InitialUnit = state1;
+
+      int eventCallCount = 0;
+      bool transitionOccurred = false;
+
+      state1.OnEnter = () => Debug.Log("State1 Entered");
+      state1.On<TestEvent>(@event => 
+      {
+        eventCallCount++;
+        Debug.Log($"State1: Event received, count={eventCallCount}");
+      });
+
+      state2.OnEnter = () => 
+      {
+        transitionOccurred = true;
+        Debug.Log("State2 Entered via event transition");
+      };
+
+      // Setup event-based transition (like your scene activation scenario)
+      (state1 > state2).On<TestEventA>();
+
+      // CRITICAL: Raise event BEFORE first Update (before StateMachine.Start())
+      // This simulates the scenario where an event fires during initialization
+      EventBus.Raise(new TestEvent());
+      EventBus.Raise(new TestEventA());
+
+      // At this point, StateMachine hasn't Started yet, so:
+      // - Events should NOT trigger callbacks (CurrentUnit = null, IsActive = false)
+      // - Transition should NOT occur yet
+      Assert.AreEqual(0, eventCallCount, "Event should NOT be handled before first Update (StateMachine not started)");
+      Assert.IsFalse(transitionOccurred, "Transition should NOT occur before first Update");
+
+      yield return null; // First Update: StateMachine.Start() is called
+
+      // Now StateMachine has started, CurrentUnit is set
+      // But events were already raised, so they're missed
+      Assert.AreEqual(0, eventCallCount, "Event was raised before Start, so it's missed");
+      Assert.IsFalse(transitionOccurred, "Transition event was raised before Start, so it's missed");
+
+      // Raise events again after Start - now they should work
+      EventBus.Raise(new TestEvent());
+      Assert.AreEqual(1, eventCallCount, "Event should be handled after StateMachine has started");
+
+      EventBus.Raise(new TestEventA());
+      yield return null; // Allow transition to process
+
+      Assert.IsTrue(transitionOccurred, "Transition should occur after StateMachine has started");
+
+      Object.DestroyImmediate(go);
+    }
+
+    [UnityTest]
     public IEnumerator StateMachineWrapper_OnExit_AccessesDestroyedChildObject_ShouldNotThrowException()
     {
       ResetWrapperTestFlags();
