@@ -1362,6 +1362,152 @@ namespace Nopnag.StateMachineLib.Tests
     }
 
     [UnityTest]
+    public IEnumerator StateMachineWrapper_ComponentDisabledEnabled_EventSubscriptionsPersist()
+    {
+      ResetWrapperTestFlags();
+      
+      // Create GameObject with MonoBehaviour
+      var go = new GameObject("TestEventSubscription");
+      var mb = go.AddComponent<TestMonoBehaviourForWrapper>();
+      mb.enabled = true;
+
+      // Create managed StateMachine
+      var sm = mb.CreateManagedStateMachine();
+      var graph = sm.CreateGraph();
+      var idleState = graph.CreateState();
+      graph.InitialUnit = idleState;
+
+      // Track event calls
+      int eventCallCount = 0;
+      idleState.OnEnter = () => Debug.Log("Idle State Entered");
+      idleState.On<TestEvent>(@event => 
+      {
+        eventCallCount++;
+        Debug.Log($"TestEvent received while component enabled={mb.enabled}, eventCallCount={eventCallCount}");
+      });
+
+      yield return null; // Frame 1: State enters, subscription active
+
+      // Raise event while enabled
+      EventBus.Raise(new TestEvent());
+      sm.UpdateMachine(); // Process event
+      Assert.AreEqual(1, eventCallCount, "Event should be received while component is enabled");
+
+      // Disable component
+      mb.enabled = false;
+      yield return null; // Frame 2: Component disabled, SM paused
+
+      // Raise event while disabled
+      EventBus.Raise(new TestEvent());
+      yield return null;
+      Assert.AreEqual(1, eventCallCount, "Event should NOT be received while component is disabled (IsActive=false)");
+
+      // Re-enable component
+      mb.enabled = true;
+      yield return null; // Frame 3: Component re-enabled
+
+      // Raise event after re-enable
+      EventBus.Raise(new TestEvent());
+      sm.UpdateMachine(); // Process event
+      Assert.AreEqual(2, eventCallCount, "Event should be received again after component is re-enabled");
+
+      // Disable again
+      mb.enabled = false;
+      yield return null;
+
+      // Raise event while disabled again
+      EventBus.Raise(new TestEvent());
+      yield return null;
+      Assert.AreEqual(2, eventCallCount, "Event should still NOT be received while disabled");
+
+      // Re-enable again
+      mb.enabled = true;
+      yield return null;
+
+      // Raise event after second re-enable
+      EventBus.Raise(new TestEvent());
+      sm.UpdateMachine();
+      Assert.AreEqual(3, eventCallCount, "Event should be received after second re-enable");
+
+      Object.DestroyImmediate(go);
+    }
+
+    [UnityTest]
+    public IEnumerator StateMachineWrapper_GameObjectSetActive_PausesStateMachine()
+    {
+      ResetWrapperTestFlags();
+      
+      // Create GameObject with MonoBehaviour
+      var go = new GameObject("TestGameObjectActive");
+      var mb = go.AddComponent<TestMonoBehaviourForWrapper>();
+      mb.enabled = true;
+
+      // Create managed StateMachine
+      var sm = mb.CreateManagedStateMachine();
+      var graph = sm.CreateGraph();
+      var testState = graph.CreateState();
+      SetupWrapperTestState(testState);
+      graph.InitialUnit = testState;
+
+      // Track event calls
+      int eventCallCount = 0;
+      testState.On<TestEvent>(@event => 
+      {
+        eventCallCount++;
+        Debug.Log($"Event received, count={eventCallCount}");
+      });
+
+      yield return null; // Frame 1: State enters, subscription active
+
+      Assert.IsTrue(_wrapperTest_StateEntered, "State should enter");
+      Assert.AreEqual(1, _wrapperTest_StateUpdateCount, "State should update once");
+
+      // Raise event while active
+      EventBus.Raise(new TestEvent());
+      sm.UpdateMachine();
+      Assert.AreEqual(1, eventCallCount, "Event should be received while GameObject is active");
+
+      // Deactivate GameObject
+      go.SetActive(false);
+      
+      // Wait one more frame to ensure OnDisable has been processed
+      yield return null; // Frame 2: OnDisable called, but update might have already run this frame
+      yield return null; // Frame 3: Now GameObject is definitely inactive, no updates should occur
+
+      // Update count might be 1 or 2 depending on timing, but should NOT increase beyond this point
+      int countAfterDisable = _wrapperTest_StateUpdateCount;
+      Assert.That(countAfterDisable, Is.LessThanOrEqualTo(2), "State should have stopped updating");
+      
+      // Wait another frame to confirm no more updates
+      yield return null;
+      Assert.AreEqual(countAfterDisable, _wrapperTest_StateUpdateCount, "State should NOT update while GameObject is inactive");
+
+      // Raise event while inactive
+      EventBus.Raise(new TestEvent());
+      yield return null;
+      Assert.AreEqual(1, eventCallCount, "Event should NOT be received while GameObject is inactive");
+
+      // Reactivate GameObject
+      go.SetActive(true);
+      yield return null; // GameObject active again, OnEnable called
+
+      // State should resume updating (timing may vary)
+      int countAfterReactivate = _wrapperTest_StateUpdateCount;
+      Assert.That(countAfterReactivate, Is.GreaterThanOrEqualTo(countAfterDisable), "State should resume updating after reactivation");
+      
+      // Verify updates continue
+      yield return null;
+      Assert.That(_wrapperTest_StateUpdateCount, Is.GreaterThan(countAfterReactivate), "State should continue updating");
+
+      // Raise event after reactivate
+      EventBus.Raise(new TestEvent());
+      sm.UpdateMachine();
+      Assert.AreEqual(2, eventCallCount, "Event should be received after GameObject is reactivated");
+
+      Object.DestroyImmediate(go);
+    }
+
+    [UnityTest]
     public IEnumerator StateMachineWrapper_OnExit_AccessesDestroyedChildObject_ShouldNotThrowException()
     {
       ResetWrapperTestFlags();
