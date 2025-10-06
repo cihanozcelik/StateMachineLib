@@ -1969,9 +1969,6 @@ namespace Nopnag.StateMachineLib.Tests
     public void Disposal_Setup()
     {
       _eventHandlerCallCount_disposal = 0;
-      // Ensure ManualEventManager instance exists for wrapper tests if it's created on demand by wrapper
-      // and tests run in an environment where it might not be auto-created.
-      // For editor tests, this is usually fine.
     }
 
     [Test]
