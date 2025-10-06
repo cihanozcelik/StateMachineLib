@@ -59,6 +59,41 @@ public class StateMachineWrapper : MonoBehaviour
         UpdateAllStateMachines(sm => sm.LateUpdateMachine());
     }
     
+    void OnEnable()
+    {
+        // When wrapper becomes enabled (GameObject active or component enabled)
+        // Turn on power for all managed state machines
+        UpdateAllStateMachinesPower(true);
+    }
+    
+    void OnDisable()
+    {
+        // When wrapper becomes disabled (GameObject inactive or component disabled)
+        // Turn off power for all managed state machines (pause without Exit)
+        UpdateAllStateMachinesPower(false);
+    }
+    
+    void UpdateAllStateMachinesPower(bool turnOn)
+    {
+        foreach (var kvp in _managedStateMachines)
+        {
+            var owner = kvp.Key;
+            var sm = kvp.Value;
+            
+            if (owner == null || !owner) continue;
+            
+            // Only control power if owner is enabled
+            // (GameObject inactive affects wrapper, but individual component disable is separate)
+            bool shouldBeActive = turnOn && owner.enabled;
+            
+            if (sm.IsTurnedOn != shouldBeActive)
+            {
+                Debug.Log($"[OnEnable/OnDisable] {owner.GetType().Name} power: {sm.IsTurnedOn} -> {shouldBeActive}");
+                sm.SetTurnedOn(shouldBeActive);
+            }
+        }
+    }
+    
     void UpdateAllStateMachines(Action<StateMachine> updateAction)
     {
         // Iterate through all managed state machines
@@ -78,12 +113,28 @@ public class StateMachineWrapper : MonoBehaviour
                 continue;
             }
             
-            // Only update if owner MonoBehaviour is enabled
-            if (owner.enabled)
+            // Check if owner is active and enabled
+            bool shouldBeActive = owner.enabled && owner.gameObject.activeInHierarchy;
+            
+            // Debug: Log state changes
+            if (sm.IsTurnedOn != shouldBeActive)
+            {
+                Debug.Log($"[StateMachineWrapper] {owner.GetType().Name} power changing: {sm.IsTurnedOn} -> {shouldBeActive} (enabled={owner.enabled}, activeInHierarchy={owner.gameObject.activeInHierarchy})");
+            }
+            
+            // Control power based on owner's active state
+            // This pauses the state machine (no updates, no event callbacks) without calling Exit
+            if (sm.IsTurnedOn != shouldBeActive)
+            {
+                sm.SetTurnedOn(shouldBeActive);
+            }
+            
+            // Only update if owner MonoBehaviour is enabled and GameObject is active
+            if (shouldBeActive)
             {
                 updateAction?.Invoke(sm);
             }
-            // If disabled, state machine doesn't update (paused state)
+            // If disabled or inactive, state machine is paused (power off, no updates, no events)
         }
     }
     
