@@ -13,11 +13,15 @@ public class StateMachineWrapper : MonoBehaviour
 
   /// <summary>
   /// Creates and registers a new StateMachine for the given MonoBehaviour owner.
+  /// The setup callback is invoked immediately, and then the StateMachine is started automatically.
   /// </summary>
-  public StateMachine CreateStateMachineFor(MonoBehaviour owner)
+  public StateMachine CreateStateMachineFor(MonoBehaviour owner, Action<StateMachine> setupCallback)
   {
     if (owner == null)
       throw new ArgumentNullException(nameof(owner));
+    
+    if (setupCallback == null)
+      throw new ArgumentNullException(nameof(setupCallback));
 
     if (_managedStateMachines.ContainsKey(owner))
     {
@@ -29,6 +33,14 @@ public class StateMachineWrapper : MonoBehaviour
 
     var sm = new StateMachine();
     _managedStateMachines[owner] = sm;
+    
+    // Allow user to set up the StateMachine
+    setupCallback(sm);
+    
+    // Start the StateMachine immediately after setup
+    // This ensures event transitions work right away (even in Awake)
+    sm.Start();
+    
     return sm;
   }
 
