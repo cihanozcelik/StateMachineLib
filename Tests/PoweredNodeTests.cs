@@ -5,10 +5,12 @@ namespace Nopnag.StateMachineLib.Tests
 {
   public class PoweredNodeTests
   {
+#pragma warning disable CS8618 // Non-nullable field must contain non-null value when exiting constructor
     PoweredNode _childNode;
     PoweredNode _grandChildNode;
     PoweredNode _parentNode;
     PoweredNode _powerSource;
+#pragma warning restore CS8618
 
     [Test]
     public void Child_GetsPowerFromActiveParent()
@@ -246,10 +248,12 @@ namespace Nopnag.StateMachineLib.Tests
     [TearDown]
     public void Teardown()
     {
-      _powerSource    = null;
-      _parentNode     = null;
-      _childNode      = null;
-      _grandChildNode = null;
+#pragma warning disable CS8625 // Cannot convert null literal to non-nullable reference type
+      _powerSource    = null!;
+      _parentNode     = null!;
+      _childNode      = null!;
+      _grandChildNode = null!;
+#pragma warning restore CS8625
     }
   }
 }

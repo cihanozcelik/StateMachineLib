@@ -10,14 +10,20 @@ public class StateMachineWrapper : MonoBehaviour
   bool _hasBeenDisabled = false;
   // Dictionary: MonoBehaviour -> StateMachine mapping
   Dictionary<MonoBehaviour, StateMachine> _managedStateMachines = new();
+  // Track which StateMachines haven't been Started yet (created while owner was disabled)
+  HashSet<StateMachine> _pendingStartStateMachines = new();
 
   /// <summary>
   /// Creates and registers a new StateMachine for the given MonoBehaviour owner.
+  /// The setup callback is invoked immediately, and then the StateMachine is started automatically.
   /// </summary>
-  public StateMachine CreateStateMachineFor(MonoBehaviour owner)
+  public StateMachine CreateStateMachineFor(MonoBehaviour owner, Action<StateMachine> setupCallback)
   {
     if (owner == null)
       throw new ArgumentNullException(nameof(owner));
+    
+    if (setupCallback == null)
+      throw new ArgumentNullException(nameof(setupCallback));
 
     if (_managedStateMachines.ContainsKey(owner))
     {
@@ -29,6 +35,23 @@ public class StateMachineWrapper : MonoBehaviour
 
     var sm = new StateMachine();
     _managedStateMachines[owner] = sm;
+    
+    // Allow user to set up the StateMachine
+    setupCallback(sm);
+    
+    // Only Start the StateMachine if the owner MonoBehaviour is currently enabled
+    // If disabled, Start will be deferred until OnEnable
+    if (owner.enabled && owner.gameObject.activeInHierarchy)
+    {
+      sm.Start();
+    }
+    else
+    {
+      // Mark as pending start (will be started when owner becomes enabled)
+      _pendingStartStateMachines.Add(sm);
+      sm.SetTurnedOn(false);
+    }
+    
     return sm;
   }
 
@@ -67,11 +90,22 @@ public class StateMachineWrapper : MonoBehaviour
       }
 
       _managedStateMachines.Remove(owner);
+      _pendingStartStateMachines.Remove(sm); // Clean up pending start tracking
     }
   }
 
   void OnEnable()
   {
+    // Start any StateMachines that were created while their owner was disabled
+    if (_pendingStartStateMachines.Count > 0)
+    {
+      foreach (var sm in _pendingStartStateMachines)
+      {
+        sm.Start();
+      }
+      _pendingStartStateMachines.Clear();
+    }
+    
     // Only restore power if this is a re-enable (not first creation)
     // This prevents interfering with StateMachine initialization
     if (_hasBeenDisabled)

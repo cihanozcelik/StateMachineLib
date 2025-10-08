@@ -40,14 +40,18 @@ namespace Nopnag.StateMachineLib.Tests
     // Event tracking flags
     bool _detachEventReceived;
     bool _attachEventReceived;
+#pragma warning disable CS0414
     bool _timerEventReceived;
+#pragma warning restore CS0414
     int _eventCallCount;
     string _lastEventMessage;
 
     // State lifecycle tracking
     bool _detachState1Entered, _detachState1Updated, _detachState1Exited;
+#pragma warning disable CS0414
     bool _detachState2Entered, _detachState2Updated, _detachState2Exited;
     bool _detachState3Entered, _detachState3Updated, _detachState3Exited;
+#pragma warning restore CS0414
     int _detachState1UpdateCount, _detachState2UpdateCount;
     float _detachState1UpdateTime, _detachState2UpdateTime;
 
@@ -528,8 +532,10 @@ namespace Nopnag.StateMachineLib.Tests
       var subState2 = subGraph.CreateState();
       subGraph.InitialUnit = subState1;
 
+#pragma warning disable CS0219
       bool subState1Entered = false;
       bool subState2Entered = false;
+#pragma warning restore CS0219
       subState1.OnEnter = () => subState1Entered = true;
       subState2.OnEnter = () => subState2Entered = true;
 
@@ -707,7 +713,9 @@ namespace Nopnag.StateMachineLib.Tests
     public IEnumerator DetachedGraph_DoesNotReceiveStateMachineLocalEvents()
     {
       // Setup listeners on both graphs
+#pragma warning disable CS0219
       bool mainGraphEventReceived = false;
+#pragma warning restore CS0219
       bool detachableGraphEventReceived = false;
 
       _mainState1.On<TestAttachEvent>(evt => mainGraphEventReceived = true);
@@ -739,7 +747,9 @@ namespace Nopnag.StateMachineLib.Tests
     [UnityTest]
     public IEnumerator DetachedGraph_CannotSendLocalEvents()
     {
+#pragma warning disable CS0219
       bool mainGraphEventReceived = false;
+#pragma warning restore CS0219
       _mainState1.On<TestDetachEvent>(evt => mainGraphEventReceived = true);
 
       _stateMachine.Start();

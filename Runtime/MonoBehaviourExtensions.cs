@@ -1,27 +1,23 @@
+using System;
 using UnityEngine;
 
-namespace Nopnag.StateMachineLib // Assuming StateMachine and StateMachineWrapper are in this namespace
+namespace Nopnag.StateMachineLib
 {
     public static class MonoBehaviourExtensions
     {
         /// <summary>
-        /// Creates a new StateMachine instance whose lifecycle (Start, Update, Exit) 
-        /// is automatically managed and tied to this MonoBehaviour.
-        /// - The StateMachine will automatically receive Update, FixedUpdate, and LateUpdate calls.
-        /// - It will automatically Start when the MonoBehaviour is active and updates begin.
-        /// - It will pause updates if the MonoBehaviour is disabled.
-        /// - It will automatically call Exit() on the StateMachine when the MonoBehaviour (or its GameObject) is destroyed.
-        /// - Multiple MonoBehaviours on the same GameObject can each have their own managed StateMachine.
+        /// Creates a new StateMachine instance whose lifecycle is automatically managed.
+        /// The setup callback allows you to configure the StateMachine (create graphs, states, transitions).
+        /// The StateMachine will be automatically started after the callback completes, ensuring
+        /// that event transitions work immediately (even in Awake).
         /// </summary>
         /// <param name="mb">The MonoBehaviour to link the StateMachine's lifecycle to.</param>
-        /// <returns>A new StateMachine instance that is lifecycle-managed.</returns>
-        public static StateMachine CreateManagedStateMachine(this MonoBehaviour mb)
+        /// <param name="setupCallback">Callback to configure the StateMachine</param>
+        /// <returns>A new StateMachine instance that is lifecycle-managed and started.</returns>
+        public static StateMachine CreateManagedStateMachine(this MonoBehaviour mb, Action<StateMachine> setupCallback)
         {
-            // Get or create the wrapper component on this GameObject
             var wrapper = StateMachineWrapper.GetOrCreate(mb.gameObject);
-            
-            // Create and register a new StateMachine for this MonoBehaviour
-            return wrapper.CreateStateMachineFor(mb);
+            return wrapper.CreateStateMachineFor(mb, setupCallback);
         }
     }
 } 

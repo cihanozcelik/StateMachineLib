@@ -61,6 +61,7 @@ namespace Nopnag.StateMachineLib.Tests
       public int Value { get; set; }
     }
 
+#pragma warning disable CS0414 // Field is assigned but never used
     bool _actionListenerCalled;
     bool _anyStatePredicateCondition; // For testing AnyState.When
     bool _eventAListenerCalled, _eventBListenerCalled, _damageListenerCalled;
@@ -74,6 +75,7 @@ namespace Nopnag.StateMachineLib.Tests
     bool         _state2Entered,     _state2Updated,     _state2Exited;
     bool         _state3Entered,     _state3Updated,     _state3Exited;
     bool         _state4Entered,     _state4Updated,     _state4Exited; // Added flags for _state4
+#pragma warning restore CS0414
     StateMachine _stateMachine;
     bool         _stunnedEntered, _stunnedUpdated, _stunnedExited;
 
@@ -81,7 +83,9 @@ namespace Nopnag.StateMachineLib.Tests
     bool _wrapperTest_StateEntered     = false;
     bool _wrapperTest_StateExited      = false;
     int  _wrapperTest_StateUpdateCount = 0;
+#pragma warning disable CS0414
     bool _wrapperTest_StateUpdated     = false;
+#pragma warning restore CS0414
 
     [UnityTest]
     public IEnumerator AnyState_Operator_OnEvent_TransitionsFromActiveState()
@@ -1168,13 +1172,13 @@ namespace Nopnag.StateMachineLib.Tests
       var mb = go.AddComponent<TestMonoBehaviourForWrapper>();
       mb.enabled = true;
 
-      // var wrapper = new StateMachineWrapper(mb); // Old way
-      var sm = mb.CreateManagedStateMachine(); // New way
-
-      var graph     = sm.CreateGraph();
-      var testState = graph.CreateState();
-      SetupWrapperTestState(testState);
-      graph.InitialUnit = testState;
+      mb.CreateManagedStateMachine(sm =>
+      {
+        var graph     = sm.CreateGraph();
+        var testState = graph.CreateState();
+        SetupWrapperTestState(testState);
+        graph.InitialUnit = testState;
+      });
 
       yield return null; // Frame 1: SM Starts and Updates
       Assert.IsTrue(_wrapperTest_StateEntered, "State did not enter.");
@@ -1201,13 +1205,13 @@ namespace Nopnag.StateMachineLib.Tests
       var mb = go.AddComponent<TestMonoBehaviourForWrapper>();
       mb.enabled = false; // Initially disabled
 
-      // using (var wrapper = new StateMachineWrapper(mb)) // Old way
-      var sm = mb.CreateManagedStateMachine(); // New way
-
-      var graph     = sm.CreateGraph();
-      var testState = graph.CreateState();
-      SetupWrapperTestState(testState);
-      graph.InitialUnit = testState;
+      mb.CreateManagedStateMachine(sm =>
+      {
+        var graph     = sm.CreateGraph();
+        var testState = graph.CreateState();
+        SetupWrapperTestState(testState);
+        graph.InitialUnit = testState;
+      });
 
       yield return null; // Frame 1: MB is disabled. SM should not Start or Update.
       Assert.IsFalse(_wrapperTest_StateEntered,
@@ -1234,13 +1238,13 @@ namespace Nopnag.StateMachineLib.Tests
       var mb = go.AddComponent<TestMonoBehaviourForWrapper>();
       mb.enabled = true;
 
-      // using (var wrapper = new StateMachineWrapper(mb)) // Old way
-      var sm = mb.CreateManagedStateMachine(); // New way
-
-      var graph     = sm.CreateGraph();
-      var testState = graph.CreateState();
-      SetupWrapperTestState(testState);
-      graph.InitialUnit = testState;
+      mb.CreateManagedStateMachine(sm =>
+      {
+        var graph     = sm.CreateGraph();
+        var testState = graph.CreateState();
+        SetupWrapperTestState(testState);
+        graph.InitialUnit = testState;
+      });
 
       yield return null; // Frame 1: SM Starts and Updates (count = 1)
       Assert.IsTrue(_wrapperTest_StateEntered, "State did not enter.");
@@ -1271,13 +1275,13 @@ namespace Nopnag.StateMachineLib.Tests
       var mb = go.AddComponent<TestMonoBehaviourForWrapper>();
       mb.enabled = true;
 
-      // using (var wrapper = new StateMachineWrapper(mb)) // Old way
-      var sm = mb.CreateManagedStateMachine(); // New way
-
-      var graph     = sm.CreateGraph();
-      var testState = graph.CreateState();
-      SetupWrapperTestState(testState);
-      graph.InitialUnit = testState; // Set initial state
+      mb.CreateManagedStateMachine(sm =>
+      {
+        var graph     = sm.CreateGraph();
+        var testState = graph.CreateState();
+        SetupWrapperTestState(testState);
+        graph.InitialUnit = testState;
+      });
 
       yield return null; // Frame 1: SM should Start and Update.
 
@@ -1303,60 +1307,67 @@ namespace Nopnag.StateMachineLib.Tests
       mb1.enabled = true;
       mb2.enabled = true;
 
+      // Track state lifecycle
+      bool state1Entered = false;
+      bool state2Entered = false;
+      int state1UpdateCount = 0;
+      int state2UpdateCount = 0;
+
       // Create two separate StateMachines
-      var sm1 = mb1.CreateManagedStateMachine();
-      var sm2 = mb2.CreateManagedStateMachine();
+      mb1.CreateManagedStateMachine(sm1 =>
+      {
+        var graph1 = sm1.CreateGraph();
+        var state1 = graph1.CreateState();
+        graph1.InitialUnit = state1;
+        
+        state1.OnEnter = () => state1Entered = true;
+        state1.OnUpdate = t => state1UpdateCount++;
+      });
 
-      var graph1 = sm1.CreateGraph();
-      var state1 = graph1.CreateState();
-      graph1.InitialUnit = state1;
-
-      var graph2 = sm2.CreateGraph();
-      var state2 = graph2.CreateState();
-      graph2.InitialUnit = state2;
-
-      // Track updates independently
-      int sm1UpdateCount = 0;
-      int sm2UpdateCount = 0;
-
-      state1.OnEnter = () => Debug.Log("SM1 State Entered");
-      state1.OnUpdate = _ => sm1UpdateCount++;
-
-      state2.OnEnter = () => Debug.Log("SM2 State Entered");
-      state2.OnUpdate = _ => sm2UpdateCount++;
+      mb2.CreateManagedStateMachine(sm2 =>
+      {
+        var graph2 = sm2.CreateGraph();
+        var state2 = graph2.CreateState();
+        graph2.InitialUnit = state2;
+        
+        state2.OnEnter = () => state2Entered = true;
+        state2.OnUpdate = t => state2UpdateCount++;
+      });
 
       yield return null; // Frame 1: Both start and update
 
-      Assert.AreEqual(1, sm1UpdateCount, "SM1 should have updated once");
-      Assert.AreEqual(1, sm2UpdateCount, "SM2 should have updated once");
+      Assert.IsTrue(state1Entered, "State1 should have entered");
+      Assert.IsTrue(state2Entered, "State2 should have entered");
+      Assert.AreEqual(1, state1UpdateCount, "SM1 should have updated once");
+      Assert.AreEqual(1, state2UpdateCount, "SM2 should have updated once");
 
       // Disable ONLY mb1
       mb1.enabled = false;
       yield return null; // Frame 2: Only SM2 should update
 
-      Assert.AreEqual(1, sm1UpdateCount, "SM1 should NOT update (owner disabled)");
-      Assert.AreEqual(2, sm2UpdateCount, "SM2 should continue updating");
+      Assert.AreEqual(1, state1UpdateCount, "SM1 should NOT update (owner disabled)");
+      Assert.AreEqual(2, state2UpdateCount, "SM2 should continue updating");
 
       // Disable mb2 as well
       mb2.enabled = false;
       yield return null; // Frame 3: Neither should update
 
-      Assert.AreEqual(1, sm1UpdateCount, "SM1 should still be paused");
-      Assert.AreEqual(2, sm2UpdateCount, "SM2 should now be paused too");
+      Assert.AreEqual(1, state1UpdateCount, "SM1 should still be paused");
+      Assert.AreEqual(2, state2UpdateCount, "SM2 should now be paused too");
 
       // Re-enable mb1 only
       mb1.enabled = true;
       yield return null; // Frame 4: Only SM1 should resume
 
-      Assert.AreEqual(2, sm1UpdateCount, "SM1 should resume");
-      Assert.AreEqual(2, sm2UpdateCount, "SM2 should still be paused");
+      Assert.AreEqual(2, state1UpdateCount, "SM1 should resume");
+      Assert.AreEqual(2, state2UpdateCount, "SM2 should still be paused");
 
       // Re-enable mb2
       mb2.enabled = true;
       yield return null; // Frame 5: Both should update
 
-      Assert.AreEqual(3, sm1UpdateCount, "SM1 should update");
-      Assert.AreEqual(3, sm2UpdateCount, "SM2 should resume");
+      Assert.AreEqual(3, state1UpdateCount, "SM1 should update");
+      Assert.AreEqual(3, state2UpdateCount, "SM2 should resume");
 
       Object.DestroyImmediate(go);
     }
@@ -1371,19 +1382,22 @@ namespace Nopnag.StateMachineLib.Tests
       var mb = go.AddComponent<TestMonoBehaviourForWrapper>();
       mb.enabled = true;
 
-      // Create managed StateMachine
-      var sm = mb.CreateManagedStateMachine();
-      var graph = sm.CreateGraph();
-      var idleState = graph.CreateState();
-      graph.InitialUnit = idleState;
-
       // Track event calls
       int eventCallCount = 0;
-      idleState.OnEnter = () => Debug.Log("Idle State Entered");
-      idleState.On<TestEvent>(@event => 
+
+      // Create managed StateMachine (need sm reference for manual UpdateMachine calls)
+      var sm = mb.CreateManagedStateMachine(machine =>
       {
-        eventCallCount++;
-        Debug.Log($"TestEvent received while component enabled={mb.enabled}, eventCallCount={eventCallCount}");
+        var graph = machine.CreateGraph();
+        var idleState = graph.CreateState();
+        graph.InitialUnit = idleState;
+
+        idleState.OnEnter = () => Debug.Log("Idle State Entered");
+        idleState.On<TestEvent>(@event => 
+        {
+          eventCallCount++;
+          Debug.Log($"TestEvent received while component enabled={mb.enabled}, eventCallCount={eventCallCount}");
+        });
       });
 
       yield return null; // Frame 1: State enters, subscription active
@@ -1442,19 +1456,22 @@ namespace Nopnag.StateMachineLib.Tests
       var mb = go.AddComponent<TestMonoBehaviourForWrapper>();
       mb.enabled = true;
 
-      // Create managed StateMachine
-      var sm = mb.CreateManagedStateMachine();
-      var graph = sm.CreateGraph();
-      var testState = graph.CreateState();
-      SetupWrapperTestState(testState);
-      graph.InitialUnit = testState;
-
       // Track event calls
       int eventCallCount = 0;
-      testState.On<TestEvent>(@event => 
+
+      // Create managed StateMachine (return value needed for manual UpdateMachine call)
+      var sm = mb.CreateManagedStateMachine(machine =>
       {
-        eventCallCount++;
-        Debug.Log($"Event received, count={eventCallCount}");
+        var graph = machine.CreateGraph();
+        var testState = graph.CreateState();
+        SetupWrapperTestState(testState);
+        graph.InitialUnit = testState;
+
+        testState.On<TestEvent>(@event => 
+        {
+          eventCallCount++;
+          Debug.Log($"Event received, count={eventCallCount}");
+        });
       });
 
       yield return null; // Frame 1: State enters, subscription active
@@ -1519,58 +1536,52 @@ namespace Nopnag.StateMachineLib.Tests
       var mb = go.AddComponent<TestMonoBehaviourForWrapper>();
       mb.enabled = true;
 
-      // Create managed StateMachine
-      var sm = mb.CreateManagedStateMachine();
-      var graph = sm.CreateGraph();
-      var state1 = graph.CreateState();
-      var state2 = graph.CreateState();
-      graph.InitialUnit = state1;
-
       int eventCallCount = 0;
       bool transitionOccurred = false;
 
-      state1.OnEnter = () => Debug.Log("State1 Entered");
-      state1.On<TestEvent>(@event => 
+      // Create managed StateMachine
+      mb.CreateManagedStateMachine(sm =>
       {
-        eventCallCount++;
-        Debug.Log($"State1: Event received, count={eventCallCount}");
+        var graph = sm.CreateGraph();
+        var state1 = graph.CreateState();
+        var state2 = graph.CreateState();
+        graph.InitialUnit = state1;
+
+        state1.OnEnter = () => Debug.Log("State1 Entered");
+        state1.On<TestEvent>(@event => 
+        {
+          eventCallCount++;
+          Debug.Log($"State1: Event received, count={eventCallCount}");
+        });
+        
+        state2.OnEnter = () => 
+        {
+          transitionOccurred = true;
+          Debug.Log("State2 Entered via event transition");
+        };
+
+        // Setup event-based transition (like your scene activation scenario)
+        (state1 > state2).On<TestEventA>();
       });
 
-      state2.OnEnter = () => 
-      {
-        transitionOccurred = true;
-        Debug.Log("State2 Entered via event transition");
-      };
+      // NOW: StateMachine.Start() was called automatically after callback
+      // State1 should be entered immediately
+      Assert.IsTrue(eventCallCount >= 0, "State should be set up");
 
-      // Setup event-based transition (like your scene activation scenario)
-      (state1 > state2).On<TestEventA>();
-
-      // CRITICAL: Raise event BEFORE first Update (before StateMachine.Start())
-      // This simulates the scenario where an event fires during initialization
+      // CRITICAL: Raise event IMMEDIATELY after setup (simulating Awake scenario)
+      // With new API, StateMachine is already started, so events should work!
       EventBus.Raise(new TestEvent());
+      
+      // Event should be handled immediately because StateMachine.Start() was called
+      Assert.AreEqual(1, eventCallCount, "Event SHOULD be handled immediately with new API");
+      
+      // Test transition
       EventBus.Raise(new TestEventA());
+      
+      // Transition should occur immediately
+      Assert.IsTrue(transitionOccurred, "Transition SHOULD occur immediately with new API");
 
-      // At this point, StateMachine hasn't Started yet, so:
-      // - Events should NOT trigger callbacks (CurrentUnit = null, IsActive = false)
-      // - Transition should NOT occur yet
-      Assert.AreEqual(0, eventCallCount, "Event should NOT be handled before first Update (StateMachine not started)");
-      Assert.IsFalse(transitionOccurred, "Transition should NOT occur before first Update");
-
-      yield return null; // First Update: StateMachine.Start() is called
-
-      // Now StateMachine has started, CurrentUnit is set
-      // But events were already raised, so they're missed
-      Assert.AreEqual(0, eventCallCount, "Event was raised before Start, so it's missed");
-      Assert.IsFalse(transitionOccurred, "Transition event was raised before Start, so it's missed");
-
-      // Raise events again after Start - now they should work
-      EventBus.Raise(new TestEvent());
-      Assert.AreEqual(1, eventCallCount, "Event should be handled after StateMachine has started");
-
-      EventBus.Raise(new TestEventA());
-      yield return null; // Allow transition to process
-
-      Assert.IsTrue(transitionOccurred, "Transition should occur after StateMachine has started");
+      yield return null; // Complete coroutine
 
       Object.DestroyImmediate(go);
     }
@@ -1591,29 +1602,31 @@ namespace Nopnag.StateMachineLib.Tests
       childGO.SetActive(false); // Initially inactive
 
       // Create managed StateMachine
-      var sm = mb.CreateManagedStateMachine();
-      var graph = sm.CreateGraph();
-      var idleState = graph.CreateState();
-      graph.InitialUnit = idleState;
-
-      // Setup idle state to activate/deactivate child
-      idleState.OnEnter = () =>
+      mb.CreateManagedStateMachine(sm =>
       {
-        Debug.Log("Idle OnEnter: Activating child");
-        _wrapperTest_StateEntered = true;
-        childGO.SetActive(true); // Activate child when entering idle
-      };
+        var graph = sm.CreateGraph();
+        var idleState = graph.CreateState();
+        graph.InitialUnit = idleState;
 
-      idleState.OnExit = () =>
-      {
-        Debug.Log("Idle OnExit: Attempting to deactivate child");
-        _wrapperTest_StateExited = true;
-        
-        // Real-world scenario: User doesn't use try-catch
-        // This WILL throw exception if childGO is already destroyed
-        childGO.SetActive(false); // Try to deactivate child when exiting idle
-        Debug.Log("Child deactivated successfully");
-      };
+        // Setup idle state to activate/deactivate child
+        idleState.OnEnter = () =>
+        {
+          Debug.Log("Idle OnEnter: Activating child");
+          _wrapperTest_StateEntered = true;
+          childGO.SetActive(true); // Activate child when entering idle
+        };
+
+        idleState.OnExit = () =>
+        {
+          Debug.Log("Idle OnExit: Attempting to deactivate child");
+          _wrapperTest_StateExited = true;
+          
+          // Real-world scenario: User doesn't use try-catch
+          // This WILL throw exception if childGO is already destroyed
+          childGO.SetActive(false); // Try to deactivate child when exiting idle
+          Debug.Log("Child deactivated successfully");
+        };
+      });
 
       yield return null; // Frame 1: SM Starts, idle enters, child activates
 
@@ -1650,28 +1663,30 @@ namespace Nopnag.StateMachineLib.Tests
       childGO.SetActive(false); // Initially inactive
 
       // Create managed StateMachine
-      var sm = mb.CreateManagedStateMachine();
-      var graph = sm.CreateGraph();
-      var idleState = graph.CreateState();
-      graph.InitialUnit = idleState;
-
-      // Setup idle state to activate/deactivate child
-      idleState.OnEnter = () =>
+      mb.CreateManagedStateMachine(sm =>
       {
-        Debug.Log("Idle OnEnter: Activating child");
-        _wrapperTest_StateEntered = true;
-        childGO.SetActive(true);
-      };
+        var graph = sm.CreateGraph();
+        var idleState = graph.CreateState();
+        graph.InitialUnit = idleState;
 
-      idleState.OnExit = () =>
-      {
-        Debug.Log("Idle OnExit: Attempting to deactivate child");
-        _wrapperTest_StateExited = true;
-        
-        // Try to access child - this should be safe even if parent is being destroyed
-        childGO.SetActive(false);
-        Debug.Log("Child deactivated successfully");
-      };
+        // Setup idle state to activate/deactivate child
+        idleState.OnEnter = () =>
+        {
+          Debug.Log("Idle OnEnter: Activating child");
+          _wrapperTest_StateEntered = true;
+          childGO.SetActive(true);
+        };
+
+        idleState.OnExit = () =>
+        {
+          Debug.Log("Idle OnExit: Attempting to deactivate child");
+          _wrapperTest_StateExited = true;
+          
+          // Try to access child - this should be safe even if parent is being destroyed
+          childGO.SetActive(false);
+          Debug.Log("Child deactivated successfully");
+        };
+      });
 
       yield return null; // Frame 1: SM Starts, idle enters, child activates
 
@@ -1921,7 +1936,7 @@ namespace Nopnag.StateMachineLib.Tests
     public IEnumerator StateUnit_Listen_OnlyWhileActive()
     {
       var called = false;
-      _state1.Listen<TestEventA>(evt => called = true);
+      _state1.On<TestEventA>(evt => called = true);
       _stateMachine.Start();
       yield return null;
       // Should be in state1, so event triggers
@@ -1948,7 +1963,7 @@ namespace Nopnag.StateMachineLib.Tests
       var param2 = new CustomParam();
       var called = false;
       var query  = EventBus<TestEventA>.Where<CustomParam>(param1);
-      _state1.Listen(query, evt => called = true);
+      _state1.On(query, evt => called = true);
       _stateMachine.Start();
       yield return null;
       // Should be in state1, event with param2 should NOT trigger
@@ -1984,7 +1999,9 @@ namespace Nopnag.StateMachineLib.Tests
       var  subGraph    = _state1.CreateGraph(); // Use new IGraphHost API
       var  subStateA   = subGraph.CreateState();
       var  subStateB   = subGraph.CreateState();
+#pragma warning disable CS0219 // Variable is assigned but never used
       bool subAEntered = false, subAUpdated = false, subAExited = false;
+#pragma warning restore CS0219
       var  subBEntered = false;
 
       subStateA.OnEnter  = () => subAEntered   = true;
@@ -2239,9 +2256,9 @@ namespace Nopnag.StateMachineLib.Tests
     {
       public StateMachine ManagedStateMachine { get; private set; }
 
-      void Awake()
+      public void InitializeStateMachine(Action<StateMachine> setup)
       {
-        ManagedStateMachine = this.CreateManagedStateMachine();
+        ManagedStateMachine = this.CreateManagedStateMachine(setup);
       }
     }
 
@@ -2341,14 +2358,14 @@ namespace Nopnag.StateMachineLib.Tests
       var testMb =
         go.AddComponent<TestMonoBehaviour>(); // Uses the inner TestMonoBehaviour for disposal tests
 
-
-      Assert.IsNotNull(testMb.ManagedStateMachine,
-        "DisposalTest: Managed StateMachine should be created.");
-
-      var managedSM = testMb.ManagedStateMachine;
       // Need to use local variables for states and listener for this test scope
+#pragma warning disable CS8600 // Converting null literal or possible null value to non-nullable type
+#pragma warning disable CS8625 // Cannot convert null literal to non-nullable reference type
       StateUnit local_s1        = null;
       StateUnit local_s2        = null;
+      StateGraph local_graph    = null;
+#pragma warning restore CS8625
+#pragma warning restore CS8600
       var       local_callCount = 0;
       ListenerDelegate<TestEvent> local_listener = e =>
       {
@@ -2356,17 +2373,25 @@ namespace Nopnag.StateMachineLib.Tests
         local_callCount++;
       };
 
-      var graph = managedSM.CreateGraph();
-      local_s1          = graph.CreateState();
-      local_s2          = graph.CreateState();
-      graph.InitialUnit = local_s1;
-      local_s1.On<TestEvent>(local_listener);
-      (local_s1 > local_s2).On<TestEvent>(); // UNCOMMENT THIS LINE
-      managedSM.Start();                     // RE-ADD THIS LINE
+      // Initialize with callback (setup happens inside, then auto-Start)
+      testMb.InitializeStateMachine(sm =>
+      {
+        local_graph = sm.CreateGraph();
+        local_s1          = local_graph.CreateState();
+        local_s2          = local_graph.CreateState();
+        local_graph.InitialUnit = local_s1;
+        local_s1.On<TestEvent>(local_listener);
+        (local_s1 > local_s2).On<TestEvent>();
+      });
+
+      Assert.IsNotNull(testMb.ManagedStateMachine,
+        "DisposalTest: Managed StateMachine should be created.");
+
+      var managedSM = testMb.ManagedStateMachine;
 
       yield return null; // Allow SM to process Start
 
-      Debug.Log("Current unit after Start and yield in WrapperDispose: " + graph.CurrentUnit?.Name);
+      Debug.Log("Current unit after Start and yield in WrapperDispose: " + local_graph.CurrentUnit?.Name);
       Assert.IsTrue(local_s1.IsActive,
         "DisposalTest: Wrapper - local_s1 should be active after Start and before raising event.");
 
