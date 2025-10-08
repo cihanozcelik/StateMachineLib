@@ -295,7 +295,7 @@ myState.At(2.5f, () => {
 For the easiest and most robust way to use StateMachineLib with Unity's `MonoBehaviour` lifecycle, use the `CreateManagedStateMachine()` extension method. This method handles all the necessary setup for automatic updates and lifecycle management, tied directly to your `MonoBehaviour`.
 
 **How to Use:**
-Simply call `CreateManagedStateMachine()` from your `MonoBehaviour` (typically in `Awake()`) to get a fully managed `StateMachine` instance.
+Call `CreateManagedStateMachine(Action<StateMachine> setupCallback)` from your `MonoBehaviour` (typically in `Awake()`) with a setup callback. The callback receives the `StateMachine` instance for configuration, and then the `StateMachine` is automatically started.
 
 **Key Benefits:**
 *   **Automatic Lifecycle Management:** 
@@ -315,36 +315,40 @@ using Nopnag.StateMachineLib; // Required for StateMachine and the CreateManaged
 public class EnemyAI : MonoBehaviour
 {
     // Optional: Store as a class field if other methods need to access the StateMachine.
-    // private StateMachine aiStateMachine;
+    private StateMachine aiStateMachine;
 
     void Awake()
     {
-        // 1. Create a lifecycle-managed StateMachine instance.
-        StateMachine aiStateMachine = CreateManagedStateMachine(); // Called without 'this.'
-        
-        // If storing as a class field:
-        // this.aiStateMachine = CreateManagedStateMachine();
+        // Create a lifecycle-managed StateMachine with a setup callback.
+        // The callback configures the StateMachine, then it's automatically started.
+        aiStateMachine = this.CreateManagedStateMachine(sm =>
+        {
+            StateGraph brain = sm.CreateGraph();
+            
+            StateUnit patrolState = brain.CreateState();
+            patrolState.OnEnter = () => Debug.Log("Enemy: Starting patrol.");
+            // ... add patrol logic and transitions ...
+            
+            StateUnit chaseState = brain.CreateState();
+            chaseState.OnEnter = () => Debug.Log("Enemy: Chasing player!");
+            // ... add chase logic and transitions ...
 
-        // 2. Configure the StateMachine as usual.
-        StateGraph brain = aiStateMachine.CreateGraph();
-        
-        StateUnit patrolState = brain.CreateState();
-        patrolState.OnEnter = () => Debug.Log("Enemy: Starting patrol.");
-        // ... add patrol logic and transitions ...
-        
-        StateUnit chaseState = brain.CreateState();
-        chaseState.OnEnter = () => Debug.Log("Enemy: Chasing player!");
-        // ... add chase logic and transitions ...
-
-        brain.InitialUnit = patrolState;
+            brain.InitialUnit = patrolState;
+        });
         
         // All lifecycle calls (Start, Update, Exit, etc.) are handled automatically.
+        // The StateMachine is already started and ready to receive events!
     }
 }
 ```
 This extension method provides the most straightforward and recommended way to use `StateMachineLib` within Unity projects.
 
-(Internally, `CreateManagedStateMachine()` utilizes a helper component that links to a global event manager to achieve this. This underlying mechanism ensures the described automatic behaviors, but you typically don't need to interact with these components directly when using the extension method.)
+**Important Notes:**
+*   The setup callback is executed immediately, and then `StateMachine.Start()` is called automatically.
+*   If the `MonoBehaviour` is initially disabled, the `Start()` call is deferred until the component is enabled.
+*   This ensures that event-based transitions work correctly even when events are raised in the same frame as creation (e.g., in `Awake()`).
+
+(Internally, `CreateManagedStateMachine()` utilizes a `StateMachineWrapper` component on the GameObject to manage lifecycle and updates. This underlying mechanism ensures the described automatic behaviors, but you typically don't need to interact with this component directly.)
 
 ## Fluent Transition API
 
@@ -516,14 +520,6 @@ using System;
 
 public class CharacterController : MonoBehaviour
 {
-    // Note: stateMachine, movementGraph, and individual states (idleState, etc.) 
-    // are declared as local variables within Awake() in this example because all setup
-    // and usage occurs there. If other methods in CharacterController needed to 
-    // access them (e.g., to trigger events, query states), they would be declared 
-    // as class fields instead.
-    // Example of class field declaration if needed elsewhere:
-    // private StateMachine stateMachine;
-
     private Rigidbody rb;
     private float jumpForce = 5f;
     private float _stunDuration = 0.5f; 
@@ -533,55 +529,57 @@ public class CharacterController : MonoBehaviour
         rb = GetComponent<Rigidbody>();
         if (rb == null) rb = gameObject.AddComponent<Rigidbody>();
 
-        // 1. Create a lifecycle-managed StateMachine instance.
-        StateMachine stateMachine = CreateManagedStateMachine(); // Ensure no 'this.'
-
-        // --- Initialize States and Transitions --- 
-        StateGraph movementGraph = stateMachine.CreateGraph();
-
-        // Define States
-        StateUnit idleState = movementGraph.CreateState();
-        StateUnit movingState = movementGraph.CreateState();
-        StateUnit jumpingState = movementGraph.CreateState();
-        StateUnit stunnedState = movementGraph.CreateState();
-
-        // Assign State Logic
-        idleState.OnEnter = () => { 
-            Debug.Log("Entering Idle State"); 
-        };
-        idleState.OnUpdate = (timeInState) => { /* Maybe play idle animation. */ };
-        
-        movingState.OnEnter = () => Debug.Log("Entering Moving State");
-        movingState.OnUpdate = (timeInState) => 
-        { 
-            Vector3 moveDir = GetMovementInput(); 
-            rb.AddForce(moveDir * 10f * Time.deltaTime);
-        };
-
-        jumpingState.OnEnter = () => 
+        // Create a lifecycle-managed StateMachine with setup callback.
+        this.CreateManagedStateMachine(stateMachine =>
         {
-            Debug.Log("Entering Jumping State");
-            rb.AddForce(Vector3.up * jumpForce, ForceMode.Impulse);
-        };
-        
-        stunnedState.OnEnter = () => Debug.Log("Entering Stunned State");
-        stunnedState.OnUpdate = (timeInState) => { /* Maybe play stunned animation. */ };
+            // --- Initialize States and Transitions --- 
+            StateGraph movementGraph = stateMachine.CreateGraph();
 
-        // Define Transitions (using Fluent API)
-        (idleState > stunnedState).On<DamageTakenEvent>();
-        (movingState > stunnedState).On<DamageTakenEvent>();
-        (jumpingState > stunnedState).On<DamageTakenEvent>();
-        (stunnedState > idleState).After(_stunDuration);
-        (idleState > movingState).When(elapsedTime => GetMovementInput().magnitude > 0.1f);
-        (movingState > idleState).When(elapsedTime => GetMovementInput().magnitude <= 0.1f);
-        (idleState > jumpingState).When(elapsedTime => Input.GetButtonDown("Jump"));
-        (movingState > jumpingState).When(elapsedTime => Input.GetButtonDown("Jump"));
-        (jumpingState > idleState).After(1.0f); 
+            // Define States
+            StateUnit idleState = movementGraph.CreateState();
+            StateUnit movingState = movementGraph.CreateState();
+            StateUnit jumpingState = movementGraph.CreateState();
+            StateUnit stunnedState = movementGraph.CreateState();
 
-        // Set Initial State
-        movementGraph.InitialUnit = idleState;
+            // Assign State Logic
+            idleState.OnEnter = () => { 
+                Debug.Log("Entering Idle State"); 
+            };
+            idleState.OnUpdate = (timeInState) => { /* Maybe play idle animation. */ };
+            
+            movingState.OnEnter = () => Debug.Log("Entering Moving State");
+            movingState.OnUpdate = (timeInState) => 
+            { 
+                Vector3 moveDir = GetMovementInput(); 
+                rb.AddForce(moveDir * 10f * Time.deltaTime);
+            };
+
+            jumpingState.OnEnter = () => 
+            {
+                Debug.Log("Entering Jumping State");
+                rb.AddForce(Vector3.up * jumpForce, ForceMode.Impulse);
+            };
+            
+            stunnedState.OnEnter = () => Debug.Log("Entering Stunned State");
+            stunnedState.OnUpdate = (timeInState) => { /* Maybe play stunned animation. */ };
+
+            // Define Transitions (using Fluent API)
+            (idleState > stunnedState).On<DamageTakenEvent>();
+            (movingState > stunnedState).On<DamageTakenEvent>();
+            (jumpingState > stunnedState).On<DamageTakenEvent>();
+            (stunnedState > idleState).After(_stunDuration);
+            (idleState > movingState).When(elapsedTime => GetMovementInput().magnitude > 0.1f);
+            (movingState > idleState).When(elapsedTime => GetMovementInput().magnitude <= 0.1f);
+            (idleState > jumpingState).When(elapsedTime => Input.GetButtonDown("Jump"));
+            (movingState > jumpingState).When(elapsedTime => Input.GetButtonDown("Jump"));
+            (jumpingState > idleState).After(1.0f); 
+
+            // Set Initial State
+            movementGraph.InitialUnit = idleState;
+        });
         
-        // Lifecycle (Start, Update, Exit) is handled automatically by CreateManagedStateMachine().
+        // Lifecycle (Start, Update, Exit) is handled automatically.
+        // The StateMachine is already running and ready to process events!
     }
 
     Vector3 GetMovementInput()

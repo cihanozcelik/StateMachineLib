@@ -1,6 +1,6 @@
 {
   "name": "com.nopnag.statemachinelib",
-  "version": "1.1.1",
+  "version": "2.0.0",
   "displayName": "Nopnag State Machine",
   "description": "A state machine implementation for Unity with support for hierarchical graphs, dynamic management, and local events.",
   "unity": "6000.1", 
