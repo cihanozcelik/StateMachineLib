@@ -12,6 +12,13 @@ public class StateMachineWrapper : MonoBehaviour
   Dictionary<MonoBehaviour, StateMachine> _managedStateMachines = new();
   // Track which StateMachines haven't been Started yet (created while owner was disabled)
   HashSet<StateMachine> _pendingStartStateMachines = new();
+  // Cached list to avoid allocations during iteration
+  List<KeyValuePair<MonoBehaviour, StateMachine>> _cachedPairs = new();
+  
+  // Cached actions to avoid lambda allocations every frame
+  Action<StateMachine> _updateAction;
+  Action<StateMachine> _fixedUpdateAction;
+  Action<StateMachine> _lateUpdateAction;
 
   /// <summary>
   /// Creates and registers a new StateMachine for the given MonoBehaviour owner.
@@ -53,6 +60,14 @@ public class StateMachineWrapper : MonoBehaviour
     }
     
     return sm;
+  }
+
+  void Awake()
+  {
+    // Initialize cached actions once to avoid lambda allocations every frame
+    _updateAction = sm => sm.UpdateMachine();
+    _fixedUpdateAction = sm => sm.FixedUpdateMachine();
+    _lateUpdateAction = sm => sm.LateUpdateMachine();
   }
 
   /// <summary>
@@ -164,17 +179,17 @@ public class StateMachineWrapper : MonoBehaviour
 
   void Update()
   {
-    UpdateAllStateMachines(sm => sm.UpdateMachine());
+    UpdateAllStateMachines(_updateAction);
   }
 
   void FixedUpdate()
   {
-    UpdateAllStateMachines(sm => sm.FixedUpdateMachine());
+    UpdateAllStateMachines(_fixedUpdateAction);
   }
 
   void LateUpdate()
   {
-    UpdateAllStateMachines(sm => sm.LateUpdateMachine());
+    UpdateAllStateMachines(_lateUpdateAction);
   }
 
 #if UNITY_EDITOR
@@ -210,10 +225,11 @@ public class StateMachineWrapper : MonoBehaviour
   void UpdateAllStateMachines(Action<StateMachine> updateAction)
   {
     // Iterate through all managed state machines
-    // Use ToArray to avoid modification during iteration if cleanup happens
-    var pairs = new List<KeyValuePair<MonoBehaviour, StateMachine>>(_managedStateMachines);
+    // Use cached list to avoid allocations every frame
+    _cachedPairs.Clear();
+    _cachedPairs.AddRange(_managedStateMachines);
 
-    foreach (var kvp in pairs)
+    foreach (var kvp in _cachedPairs)
     {
       var owner = kvp.Key;
       var sm    = kvp.Value;
