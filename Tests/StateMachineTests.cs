@@ -61,21 +61,6 @@ namespace Nopnag.StateMachineLib.Tests
       public int Value { get; set; }
     }
 
-#pragma warning disable CS0414 // Field is assigned but never used
-    bool _actionListenerCalled;
-    bool _anyStatePredicateCondition; // For testing AnyState.When
-    bool _eventAListenerCalled, _eventBListenerCalled, _damageListenerCalled;
-
-    StateGraph _graphA, _graphB;                                  // For parallel graph tests
-    StateUnit  _state1, _state2, _state3, _stunnedState, _state4; // Added _state4 for more states
-
-    bool         _state1Entered,     _state1Updated,     _state1Exited;
-    int          _state1UpdateCount, _state2UpdateCount, _state3UpdateCount, _state4UpdateCount;
-    float        _state1UpdateTime,  _state2UpdateTime,  _state3UpdateTime,  _state4UpdateTime;
-    bool         _state2Entered,     _state2Updated,     _state2Exited;
-    bool         _state3Entered,     _state3Updated,     _state3Exited;
-    bool         _state4Entered,     _state4Updated,     _state4Exited; // Added flags for _state4
-#pragma warning restore CS0414
     StateMachine _stateMachine;
     bool         _stunnedEntered, _stunnedUpdated, _stunnedExited;
 
@@ -84,7 +69,7 @@ namespace Nopnag.StateMachineLib.Tests
     bool _wrapperTest_StateExited      = false;
     int  _wrapperTest_StateUpdateCount = 0;
 #pragma warning disable CS0414
-    bool _wrapperTest_StateUpdated     = false;
+    bool _wrapperTest_StateUpdated = false;
 #pragma warning restore CS0414
 
     [UnityTest]
@@ -474,6 +459,90 @@ namespace Nopnag.StateMachineLib.Tests
       Assert.AreEqual(_state2, _graphA.CurrentUnit, "Did not transition immediately.");
       Assert.IsTrue(_state1Exited);
       Assert.IsTrue(_state2Entered);
+    }
+
+    [UnityTest]
+    public IEnumerator EventTransition_OnlyActiveStateTransitions_NotChained()
+    {
+      // Setup: stateA > stateB, stateB > stateC, stateC > stateD on same event
+      // Goal: Verify that when event is raised while stateA is active,
+      // ONLY stateA > stateB transition occurs (not a chain to stateC or stateD)
+
+      var stateA = _graphA.CreateState();
+      var stateB = _graphA.CreateState();
+      var stateC = _graphA.CreateState();
+      var stateD = _graphA.CreateState();
+
+      bool stateAEntered = false, stateAExited = false;
+      bool stateBEntered = false, stateBExited = false;
+      bool stateCEntered = false, stateCExited = false;
+      bool stateDEntered = false, stateDExited = false;
+
+      stateA.OnEnter = () =>
+      {
+        stateAEntered = true;
+        Debug.Log("StateA Enter");
+      };
+      stateA.OnExit = () =>
+      {
+        stateAExited = true;
+        Debug.Log("StateA Exit");
+      };
+      stateB.OnEnter = () =>
+      {
+        stateBEntered = true;
+        Debug.Log("StateB Enter");
+      };
+      stateB.OnExit = () =>
+      {
+        stateBExited = true;
+        Debug.Log("StateB Exit");
+      };
+      stateC.OnEnter = () =>
+      {
+        stateCEntered = true;
+        Debug.Log("StateC Enter");
+      };
+      stateC.OnExit = () =>
+      {
+        stateCExited = true;
+        Debug.Log("StateC Exit");
+      };
+      stateD.OnEnter = () =>
+      {
+        stateDEntered = true;
+        Debug.Log("StateD Enter");
+      };
+      stateD.OnExit = () =>
+      {
+        stateDExited = true;
+        Debug.Log("StateD Exit");
+      };
+
+      // Setup transitions all on the same event type
+      (stateA > stateB).On<TestEventA>();
+      (stateB > stateC).On<TestEventA>();
+      (stateC > stateD).On<TestEventA>();
+
+      _graphA.InitialUnit = stateA;
+      _stateMachine.Start();
+
+      Assert.IsTrue(stateAEntered, "StateA should have entered");
+      Assert.AreEqual(stateA, _graphA.CurrentUnit, "Current state should be stateA");
+
+      // Raise event while stateA is active
+      EventBus<TestEventA>.Raise(new TestEventA());
+
+      // Verify: ONLY stateB transition occurred
+      Assert.IsTrue(stateAExited, "StateA should have exited");
+      Assert.IsTrue(stateBEntered, "StateB should have entered");
+      Assert.AreEqual(stateB, _graphA.CurrentUnit, "Current state should be stateB");
+
+      // Verify: stateC and stateD were NOT entered (no chain reaction)
+      Assert.IsFalse(stateCEntered, "StateC should NOT have entered (no chain)");
+      Assert.IsFalse(stateDEntered, "StateD should NOT have entered (no chain)");
+      Assert.IsFalse(stateBExited, "StateB should NOT have exited");
+      yield return null;
     }
 
     [UnityTest]
@@ -1165,6 +1234,145 @@ namespace Nopnag.StateMachineLib.Tests
     }
 
     [UnityTest]
+    public IEnumerator StateMachineWrapper_ComponentDisabledEnabled_EventSubscriptionsPersist()
+    {
+      ResetWrapperTestFlags();
+
+      // Create GameObject with MonoBehaviour
+      var go = new GameObject("TestEventSubscription");
+      var mb = go.AddComponent<TestMonoBehaviourForWrapper>();
+      mb.enabled = true;
+
+      // Track event calls
+      var eventCallCount = 0;
+
+      // Create managed StateMachine (need sm reference for manual UpdateMachine calls)
+      var sm = mb.CreateManagedStateMachine(machine =>
+      {
+        var graph     = machine.CreateGraph();
+        var idleState = graph.CreateState();
+        graph.InitialUnit = idleState;
+
+        idleState.OnEnter = () => Debug.Log("Idle State Entered");
+        idleState.On<TestEvent>(@event =>
+        {
+          eventCallCount++;
+          Debug.Log(
+            $"TestEvent received while component enabled={mb.enabled}, eventCallCount={eventCallCount}");
+        });
+      });
+
+      yield return null; // Frame 1: State enters, subscription active
+
+      // Raise event while enabled
+      EventBus.Raise(new TestEvent());
+      sm.UpdateMachine(); // Process event
+      Assert.AreEqual(1, eventCallCount, "Event should be received while component is enabled");
+
+      // Disable component
+      mb.enabled = false;
+      yield return null; // Frame 2: Component disabled, SM paused
+
+      // Raise event while disabled
+      EventBus.Raise(new TestEvent());
+      yield return null;
+      Assert.AreEqual(1, eventCallCount,
+        "Event should NOT be received while component is disabled (IsActive=false)");
+
+      // Re-enable component
+      mb.enabled = true;
+      yield return null; // Frame 3: Component re-enabled
+
+      // Raise event after re-enable
+      EventBus.Raise(new TestEvent());
+      sm.UpdateMachine(); // Process event
+      Assert.AreEqual(2, eventCallCount,
+        "Event should be received again after component is re-enabled");
+
+      // Disable again
+      mb.enabled = false;
+      yield return null;
+
+      // Raise event while disabled again
+      EventBus.Raise(new TestEvent());
+      yield return null;
+      Assert.AreEqual(2, eventCallCount, "Event should still NOT be received while disabled");
+
+      // Re-enable again
+      mb.enabled = true;
+      yield return null;
+
+      // Raise event after second re-enable
+      EventBus.Raise(new TestEvent());
+      sm.UpdateMachine();
+      Assert.AreEqual(3, eventCallCount, "Event should be received after second re-enable");
+
+      Object.DestroyImmediate(go);
+    }
+
+    [UnityTest]
+    public IEnumerator StateMachineWrapper_EventRaisedBeforeFirstUpdate_WorksCorrectly()
+    {
+      // This test verifies that events raised immediately after creating StateMachine
+      // (before first Update) work correctly after the lazy Start() happens
+
+      ResetWrapperTestFlags();
+
+      var go = new GameObject("TestEarlyEvent");
+      var mb = go.AddComponent<TestMonoBehaviourForWrapper>();
+      mb.enabled = true;
+
+      var eventCallCount     = 0;
+      var transitionOccurred = false;
+
+      // Create managed StateMachine
+      mb.CreateManagedStateMachine(sm =>
+      {
+        var graph  = sm.CreateGraph();
+        var state1 = graph.CreateState();
+        var state2 = graph.CreateState();
+        graph.InitialUnit = state1;
+
+        state1.OnEnter = () => Debug.Log("State1 Entered");
+        state1.On<TestEvent>(@event =>
+        {
+          eventCallCount++;
+          Debug.Log($"State1: Event received, count={eventCallCount}");
+        });
+
+        state2.OnEnter = () =>
+        {
+          transitionOccurred = true;
+          Debug.Log("State2 Entered via event transition");
+        };
+
+        // Setup event-based transition (like your scene activation scenario)
+        (state1 > state2).On<TestEventA>();
+      });
+
+      // NOW: StateMachine.Start() was called automatically after callback
+      // State1 should be entered immediately
+      Assert.IsTrue(eventCallCount >= 0, "State should be set up");
+
+      // CRITICAL: Raise event IMMEDIATELY after setup (simulating Awake scenario)
+      // With new API, StateMachine is already started, so events should work!
+      EventBus.Raise(new TestEvent());
+
+      // Event should be handled immediately because StateMachine.Start() was called
+      Assert.AreEqual(1, eventCallCount, "Event SHOULD be handled immediately with new API");
+
+      // Test transition
+      EventBus.Raise(new TestEventA());
+
+      // Transition should occur immediately
+      Assert.IsTrue(transitionOccurred, "Transition SHOULD occur immediately with new API");
+
+      yield return null; // Complete coroutine
+
+      Object.DestroyImmediate(go);
+    }
+
+    [UnityTest]
     public IEnumerator StateMachineWrapper_ExitsStateMachine_WhenMonoBehaviourIsDestroyed()
     {
       ResetWrapperTestFlags();
@@ -1198,6 +1406,89 @@ namespace Nopnag.StateMachineLib.Tests
     }
 
     [UnityTest]
+    public IEnumerator StateMachineWrapper_GameObjectSetActive_PausesStateMachine()
+    {
+      ResetWrapperTestFlags();
+
+      // Create GameObject with MonoBehaviour
+      var go = new GameObject("TestGameObjectActive");
+      var mb = go.AddComponent<TestMonoBehaviourForWrapper>();
+      mb.enabled = true;
+
+      // Track event calls
+      var eventCallCount = 0;
+
+      // Create managed StateMachine (return value needed for manual UpdateMachine call)
+      var sm = mb.CreateManagedStateMachine(machine =>
+      {
+        var graph     = machine.CreateGraph();
+        var testState = graph.CreateState();
+        SetupWrapperTestState(testState);
+        graph.InitialUnit = testState;
+
+        testState.On<TestEvent>(@event =>
+        {
+          eventCallCount++;
+          Debug.Log($"Event received, count={eventCallCount}");
+        });
+      });
+
+      yield return null; // Frame 1: State enters, subscription active
+
+      Assert.IsTrue(_wrapperTest_StateEntered, "State should enter");
+      Assert.AreEqual(1, _wrapperTest_StateUpdateCount, "State should update once");
+
+      // Raise event while active
+      EventBus.Raise(new TestEvent());
+      sm.UpdateMachine();
+      Assert.AreEqual(1, eventCallCount, "Event should be received while GameObject is active");
+
+      // Deactivate GameObject
+      go.SetActive(false);
+
+      // Wait one more frame to ensure OnDisable has been processed
+      yield return null; // Frame 2: OnDisable called, but update might have already run this frame
+      yield return null; // Frame 3: Now GameObject is definitely inactive, no updates should occur
+
+      // Update count might be 1 or 2 depending on timing, but should NOT increase beyond this point
+      var countAfterDisable = _wrapperTest_StateUpdateCount;
+      Assert.That(countAfterDisable, Is.LessThanOrEqualTo(2), "State should have stopped updating");
+
+      // Wait another frame to confirm no more updates
+      yield return null;
+      Assert.AreEqual(countAfterDisable, _wrapperTest_StateUpdateCount,
+        "State should NOT update while GameObject is inactive");
+
+      // Raise event while inactive
+      EventBus.Raise(new TestEvent());
+      yield return null;
+      Assert.AreEqual(1, eventCallCount,
+        "Event should NOT be received while GameObject is inactive");
+
+      // Reactivate GameObject
+      go.SetActive(true);
+      yield return null; // GameObject active again, OnEnable called
+
+      // State should resume updating (timing may vary)
+      var countAfterReactivate = _wrapperTest_StateUpdateCount;
+      Assert.That(countAfterReactivate, Is.GreaterThanOrEqualTo(countAfterDisable),
+        "State should resume updating after reactivation");
+
+      // Verify updates continue
+      yield return null;
+      Assert.That(_wrapperTest_StateUpdateCount, Is.GreaterThan(countAfterReactivate),
+        "State should continue updating");
+
+      // Raise event after reactivate
+      EventBus.Raise(new TestEvent());
+      sm.UpdateMachine();
+      Assert.AreEqual(2, eventCallCount,
+        "Event should be received after GameObject is reactivated");
+
+      Object.DestroyImmediate(go);
+    }
+
+    [UnityTest]
     public IEnumerator StateMachineWrapper_HandlesMonoBehaviourDisabledInitially_ThenEnabled()
     {
       ResetWrapperTestFlags();
@@ -1228,6 +1519,202 @@ namespace Nopnag.StateMachineLib.Tests
         "State did not update after MonoBehaviour was enabled.");
 
       Object.DestroyImmediate(go);
+    }
+
+    [UnityTest]
+    public IEnumerator StateMachineWrapper_MultipleComponents_IndependentEnableDisable()
+    {
+      ResetWrapperTestFlags();
+
+      // Create GameObject with TWO MonoBehaviours
+      var go  = new GameObject("TestMultipleComponents");
+      var mb1 = go.AddComponent<TestMonoBehaviourForWrapper>();
+      var mb2 = go.AddComponent<TestMonoBehaviourForWrapper>();
+
+      mb1.enabled = true;
+      mb2.enabled = true;
+
+      // Track state lifecycle
+      var state1Entered     = false;
+      var state2Entered     = false;
+      var state1UpdateCount = 0;
+      var state2UpdateCount = 0;
+
+      // Create two separate StateMachines
+      mb1.CreateManagedStateMachine(sm1 =>
+      {
+        var graph1 = sm1.CreateGraph();
+        var state1 = graph1.CreateState();
+        graph1.InitialUnit = state1;
+
+        state1.OnEnter  = () => state1Entered = true;
+        state1.OnUpdate = t => state1UpdateCount++;
+      });
+
+      mb2.CreateManagedStateMachine(sm2 =>
+      {
+        var graph2 = sm2.CreateGraph();
+        var state2 = graph2.CreateState();
+        graph2.InitialUnit = state2;
+
+        state2.OnEnter  = () => state2Entered = true;
+        state2.OnUpdate = t => state2UpdateCount++;
+      });
+
+      yield return null; // Frame 1: Both start and update
+
+      Assert.IsTrue(state1Entered, "State1 should have entered");
+      Assert.IsTrue(state2Entered, "State2 should have entered");
+      Assert.AreEqual(1, state1UpdateCount, "SM1 should have updated once");
+      Assert.AreEqual(1, state2UpdateCount, "SM2 should have updated once");
+
+      // Disable ONLY mb1
+      mb1.enabled = false;
+      yield return null; // Frame 2: Only SM2 should update
+
+      Assert.AreEqual(1, state1UpdateCount, "SM1 should NOT update (owner disabled)");
+      Assert.AreEqual(2, state2UpdateCount, "SM2 should continue updating");
+
+      // Disable mb2 as well
+      mb2.enabled = false;
+      yield return null; // Frame 3: Neither should update
+
+      Assert.AreEqual(1, state1UpdateCount, "SM1 should still be paused");
+      Assert.AreEqual(2, state2UpdateCount, "SM2 should now be paused too");
+
+      // Re-enable mb1 only
+      mb1.enabled = true;
+      yield return null; // Frame 4: Only SM1 should resume
+
+      Assert.AreEqual(2, state1UpdateCount, "SM1 should resume");
+      Assert.AreEqual(2, state2UpdateCount, "SM2 should still be paused");
+
+      // Re-enable mb2
+      mb2.enabled = true;
+      yield return null; // Frame 5: Both should update
+
+      Assert.AreEqual(3, state1UpdateCount, "SM1 should update");
+      Assert.AreEqual(3, state2UpdateCount, "SM2 should resume");
+
+      Object.DestroyImmediate(go);
+    }
+
+    [UnityTest]
+    public IEnumerator
+      StateMachineWrapper_OnExit_AccessesDestroyedChildObject_ShouldNotThrowException()
+    {
+      ResetWrapperTestFlags();
+
+      // Create parent GameObject with MonoBehaviour
+      var parentGO = new GameObject("ParentWithStateMachine");
+      var mb       = parentGO.AddComponent<TestMonoBehaviourForWrapper>();
+      mb.enabled = true;
+
+      // Create child GameObject (sub-element)
+      var childGO = new GameObject("ChildElement");
+      childGO.transform.SetParent(parentGO.transform);
+      childGO.SetActive(false); // Initially inactive
+
+      // Create managed StateMachine
+      mb.CreateManagedStateMachine(sm =>
+      {
+        var graph     = sm.CreateGraph();
+        var idleState = graph.CreateState();
+        graph.InitialUnit = idleState;
+
+        // Setup idle state to activate/deactivate child
+        idleState.OnEnter = () =>
+        {
+          Debug.Log("Idle OnEnter: Activating child");
+          _wrapperTest_StateEntered = true;
+          childGO.SetActive(true); // Activate child when entering idle
+        };
+
+        idleState.OnExit = () =>
+        {
+          Debug.Log("Idle OnExit: Attempting to deactivate child");
+          _wrapperTest_StateExited = true;
+
+          // Real-world scenario: User doesn't use try-catch
+          // This WILL throw exception if childGO is already destroyed
+          childGO.SetActive(false); // Try to deactivate child when exiting idle
+          Debug.Log("Child deactivated successfully");
+        };
+      });
+
+      yield return null; // Frame 1: SM Starts, idle enters, child activates
+
+      Assert.IsTrue(_wrapperTest_StateEntered, "Idle state did not enter.");
+      Assert.IsTrue(childGO.activeSelf, "Child was not activated on idle enter.");
+
+      // Now destroy the parent (which destroys children first, then triggers wrapper cleanup)
+      // If execution order is: Destroy children → Destroy parent → Wrapper detects → Exit called
+      // Then childGO will be destroyed BEFORE OnExit is called = EXCEPTION
+      Object.DestroyImmediate(parentGO); // This destroys childGO first, then parentGO
+
+      yield return null; // Frame 2: Wrapper detects destruction and calls Exit
+
+      // The OnExit should have been called WITHOUT throwing exception
+      Assert.IsTrue(_wrapperTest_StateExited, "Idle state OnExit was not called.");
+
+      // If we reach here without exception, the fix is working!
+      // If exception is thrown, Unity Test Framework will catch it and test will FAIL
+    }
+
+    [UnityTest]
+    public IEnumerator StateMachineWrapper_OnExit_WithDestroyAsync_ExposesTimingIssue()
+    {
+      ResetWrapperTestFlags();
+
+      // Create parent GameObject with MonoBehaviour
+      var parentGO = new GameObject("ParentWithStateMachine");
+      var mb       = parentGO.AddComponent<TestMonoBehaviourForWrapper>();
+      mb.enabled = true;
+
+      // Create child GameObject (sub-element)
+      var childGO = new GameObject("ChildElement");
+      childGO.transform.SetParent(parentGO.transform);
+      childGO.SetActive(false); // Initially inactive
+
+      // Create managed StateMachine
+      mb.CreateManagedStateMachine(sm =>
+      {
+        var graph     = sm.CreateGraph();
+        var idleState = graph.CreateState();
+        graph.InitialUnit = idleState;
+
+        // Setup idle state to activate/deactivate child
+        idleState.OnEnter = () =>
+        {
+          Debug.Log("Idle OnEnter: Activating child");
+          _wrapperTest_StateEntered = true;
+          childGO.SetActive(true);
+        };
+
+        idleState.OnExit = () =>
+        {
+          Debug.Log("Idle OnExit: Attempting to deactivate child");
+          _wrapperTest_StateExited = true;
+
+          // Try to access child - this should be safe even if parent is being destroyed
+          childGO.SetActive(false);
+          Debug.Log("Child deactivated successfully");
+        };
+      });
+
+      yield return null; // Frame 1: SM Starts, idle enters, child activates
+
+      Assert.IsTrue(_wrapperTest_StateEntered, "Idle state did not enter.");
+      Assert.IsTrue(childGO.activeSelf, "Child was not activated on idle enter.");
+
+      // Use async Destroy instead of DestroyImmediate
+      // This might expose different timing issues
+      Object.Destroy(parentGO); // Async destroy - happens at end of frame
+
+      yield return null; // Frame 2: Destruction happens, wrapper should detect and call Exit
+
+      // The OnExit should have been called WITHOUT throwing exception
+      Assert.IsTrue(_wrapperTest_StateExited, "Idle state OnExit was not called.");
     }
 
     [UnityTest]
@@ -1292,415 +1779,6 @@ namespace Nopnag.StateMachineLib.Tests
       Assert.AreEqual(2, _wrapperTest_StateUpdateCount, "State did not update on second frame.");
 
       Object.DestroyImmediate(go); // Cleanup
-    }
-
-    [UnityTest]
-    public IEnumerator StateMachineWrapper_MultipleComponents_IndependentEnableDisable()
-    {
-      ResetWrapperTestFlags();
-      
-      // Create GameObject with TWO MonoBehaviours
-      var go = new GameObject("TestMultipleComponents");
-      var mb1 = go.AddComponent<TestMonoBehaviourForWrapper>();
-      var mb2 = go.AddComponent<TestMonoBehaviourForWrapper>();
-      
-      mb1.enabled = true;
-      mb2.enabled = true;
-
-      // Track state lifecycle
-      bool state1Entered = false;
-      bool state2Entered = false;
-      int state1UpdateCount = 0;
-      int state2UpdateCount = 0;
-
-      // Create two separate StateMachines
-      mb1.CreateManagedStateMachine(sm1 =>
-      {
-        var graph1 = sm1.CreateGraph();
-        var state1 = graph1.CreateState();
-        graph1.InitialUnit = state1;
-        
-        state1.OnEnter = () => state1Entered = true;
-        state1.OnUpdate = t => state1UpdateCount++;
-      });
-
-      mb2.CreateManagedStateMachine(sm2 =>
-      {
-        var graph2 = sm2.CreateGraph();
-        var state2 = graph2.CreateState();
-        graph2.InitialUnit = state2;
-        
-        state2.OnEnter = () => state2Entered = true;
-        state2.OnUpdate = t => state2UpdateCount++;
-      });
-
-      yield return null; // Frame 1: Both start and update
-
-      Assert.IsTrue(state1Entered, "State1 should have entered");
-      Assert.IsTrue(state2Entered, "State2 should have entered");
-      Assert.AreEqual(1, state1UpdateCount, "SM1 should have updated once");
-      Assert.AreEqual(1, state2UpdateCount, "SM2 should have updated once");
-
-      // Disable ONLY mb1
-      mb1.enabled = false;
-      yield return null; // Frame 2: Only SM2 should update
-
-      Assert.AreEqual(1, state1UpdateCount, "SM1 should NOT update (owner disabled)");
-      Assert.AreEqual(2, state2UpdateCount, "SM2 should continue updating");
-
-      // Disable mb2 as well
-      mb2.enabled = false;
-      yield return null; // Frame 3: Neither should update
-
-      Assert.AreEqual(1, state1UpdateCount, "SM1 should still be paused");
-      Assert.AreEqual(2, state2UpdateCount, "SM2 should now be paused too");
-
-      // Re-enable mb1 only
-      mb1.enabled = true;
-      yield return null; // Frame 4: Only SM1 should resume
-
-      Assert.AreEqual(2, state1UpdateCount, "SM1 should resume");
-      Assert.AreEqual(2, state2UpdateCount, "SM2 should still be paused");
-
-      // Re-enable mb2
-      mb2.enabled = true;
-      yield return null; // Frame 5: Both should update
-
-      Assert.AreEqual(3, state1UpdateCount, "SM1 should update");
-      Assert.AreEqual(3, state2UpdateCount, "SM2 should resume");
-
-      Object.DestroyImmediate(go);
-    }
-
-    [UnityTest]
-    public IEnumerator StateMachineWrapper_ComponentDisabledEnabled_EventSubscriptionsPersist()
-    {
-      ResetWrapperTestFlags();
-      
-      // Create GameObject with MonoBehaviour
-      var go = new GameObject("TestEventSubscription");
-      var mb = go.AddComponent<TestMonoBehaviourForWrapper>();
-      mb.enabled = true;
-
-      // Track event calls
-      int eventCallCount = 0;
-
-      // Create managed StateMachine (need sm reference for manual UpdateMachine calls)
-      var sm = mb.CreateManagedStateMachine(machine =>
-      {
-        var graph = machine.CreateGraph();
-        var idleState = graph.CreateState();
-        graph.InitialUnit = idleState;
-
-        idleState.OnEnter = () => Debug.Log("Idle State Entered");
-        idleState.On<TestEvent>(@event => 
-        {
-          eventCallCount++;
-          Debug.Log($"TestEvent received while component enabled={mb.enabled}, eventCallCount={eventCallCount}");
-        });
-      });
-
-      yield return null; // Frame 1: State enters, subscription active
-
-      // Raise event while enabled
-      EventBus.Raise(new TestEvent());
-      sm.UpdateMachine(); // Process event
-      Assert.AreEqual(1, eventCallCount, "Event should be received while component is enabled");
-
-      // Disable component
-      mb.enabled = false;
-      yield return null; // Frame 2: Component disabled, SM paused
-
-      // Raise event while disabled
-      EventBus.Raise(new TestEvent());
-      yield return null;
-      Assert.AreEqual(1, eventCallCount, "Event should NOT be received while component is disabled (IsActive=false)");
-
-      // Re-enable component
-      mb.enabled = true;
-      yield return null; // Frame 3: Component re-enabled
-
-      // Raise event after re-enable
-      EventBus.Raise(new TestEvent());
-      sm.UpdateMachine(); // Process event
-      Assert.AreEqual(2, eventCallCount, "Event should be received again after component is re-enabled");
-
-      // Disable again
-      mb.enabled = false;
-      yield return null;
-
-      // Raise event while disabled again
-      EventBus.Raise(new TestEvent());
-      yield return null;
-      Assert.AreEqual(2, eventCallCount, "Event should still NOT be received while disabled");
-
-      // Re-enable again
-      mb.enabled = true;
-      yield return null;
-
-      // Raise event after second re-enable
-      EventBus.Raise(new TestEvent());
-      sm.UpdateMachine();
-      Assert.AreEqual(3, eventCallCount, "Event should be received after second re-enable");
-
-      Object.DestroyImmediate(go);
-    }
-
-    [UnityTest]
-    public IEnumerator StateMachineWrapper_GameObjectSetActive_PausesStateMachine()
-    {
-      ResetWrapperTestFlags();
-      
-      // Create GameObject with MonoBehaviour
-      var go = new GameObject("TestGameObjectActive");
-      var mb = go.AddComponent<TestMonoBehaviourForWrapper>();
-      mb.enabled = true;
-
-      // Track event calls
-      int eventCallCount = 0;
-
-      // Create managed StateMachine (return value needed for manual UpdateMachine call)
-      var sm = mb.CreateManagedStateMachine(machine =>
-      {
-        var graph = machine.CreateGraph();
-        var testState = graph.CreateState();
-        SetupWrapperTestState(testState);
-        graph.InitialUnit = testState;
-
-        testState.On<TestEvent>(@event => 
-        {
-          eventCallCount++;
-          Debug.Log($"Event received, count={eventCallCount}");
-        });
-      });
-
-      yield return null; // Frame 1: State enters, subscription active
-
-      Assert.IsTrue(_wrapperTest_StateEntered, "State should enter");
-      Assert.AreEqual(1, _wrapperTest_StateUpdateCount, "State should update once");
-
-      // Raise event while active
-      EventBus.Raise(new TestEvent());
-      sm.UpdateMachine();
-      Assert.AreEqual(1, eventCallCount, "Event should be received while GameObject is active");
-
-      // Deactivate GameObject
-      go.SetActive(false);
-      
-      // Wait one more frame to ensure OnDisable has been processed
-      yield return null; // Frame 2: OnDisable called, but update might have already run this frame
-      yield return null; // Frame 3: Now GameObject is definitely inactive, no updates should occur
-
-      // Update count might be 1 or 2 depending on timing, but should NOT increase beyond this point
-      int countAfterDisable = _wrapperTest_StateUpdateCount;
-      Assert.That(countAfterDisable, Is.LessThanOrEqualTo(2), "State should have stopped updating");
-      
-      // Wait another frame to confirm no more updates
-      yield return null;
-      Assert.AreEqual(countAfterDisable, _wrapperTest_StateUpdateCount, "State should NOT update while GameObject is inactive");
-
-      // Raise event while inactive
-      EventBus.Raise(new TestEvent());
-      yield return null;
-      Assert.AreEqual(1, eventCallCount, "Event should NOT be received while GameObject is inactive");
-
-      // Reactivate GameObject
-      go.SetActive(true);
-      yield return null; // GameObject active again, OnEnable called
-
-      // State should resume updating (timing may vary)
-      int countAfterReactivate = _wrapperTest_StateUpdateCount;
-      Assert.That(countAfterReactivate, Is.GreaterThanOrEqualTo(countAfterDisable), "State should resume updating after reactivation");
-      
-      // Verify updates continue
-      yield return null;
-      Assert.That(_wrapperTest_StateUpdateCount, Is.GreaterThan(countAfterReactivate), "State should continue updating");
-
-      // Raise event after reactivate
-      EventBus.Raise(new TestEvent());
-      sm.UpdateMachine();
-      Assert.AreEqual(2, eventCallCount, "Event should be received after GameObject is reactivated");
-
-      Object.DestroyImmediate(go);
-    }
-
-    [UnityTest]
-    public IEnumerator StateMachineWrapper_EventRaisedBeforeFirstUpdate_WorksCorrectly()
-    {
-      // This test verifies that events raised immediately after creating StateMachine
-      // (before first Update) work correctly after the lazy Start() happens
-      
-      ResetWrapperTestFlags();
-      
-      var go = new GameObject("TestEarlyEvent");
-      var mb = go.AddComponent<TestMonoBehaviourForWrapper>();
-      mb.enabled = true;
-
-      int eventCallCount = 0;
-      bool transitionOccurred = false;
-
-      // Create managed StateMachine
-      mb.CreateManagedStateMachine(sm =>
-      {
-        var graph = sm.CreateGraph();
-        var state1 = graph.CreateState();
-        var state2 = graph.CreateState();
-        graph.InitialUnit = state1;
-
-        state1.OnEnter = () => Debug.Log("State1 Entered");
-        state1.On<TestEvent>(@event => 
-        {
-          eventCallCount++;
-          Debug.Log($"State1: Event received, count={eventCallCount}");
-        });
-        
-        state2.OnEnter = () => 
-        {
-          transitionOccurred = true;
-          Debug.Log("State2 Entered via event transition");
-        };
-
-        // Setup event-based transition (like your scene activation scenario)
-        (state1 > state2).On<TestEventA>();
-      });
-
-      // NOW: StateMachine.Start() was called automatically after callback
-      // State1 should be entered immediately
-      Assert.IsTrue(eventCallCount >= 0, "State should be set up");
-
-      // CRITICAL: Raise event IMMEDIATELY after setup (simulating Awake scenario)
-      // With new API, StateMachine is already started, so events should work!
-      EventBus.Raise(new TestEvent());
-      
-      // Event should be handled immediately because StateMachine.Start() was called
-      Assert.AreEqual(1, eventCallCount, "Event SHOULD be handled immediately with new API");
-      
-      // Test transition
-      EventBus.Raise(new TestEventA());
-      
-      // Transition should occur immediately
-      Assert.IsTrue(transitionOccurred, "Transition SHOULD occur immediately with new API");
-
-      yield return null; // Complete coroutine
-
-      Object.DestroyImmediate(go);
-    }
-
-    [UnityTest]
-    public IEnumerator StateMachineWrapper_OnExit_AccessesDestroyedChildObject_ShouldNotThrowException()
-    {
-      ResetWrapperTestFlags();
-      
-      // Create parent GameObject with MonoBehaviour
-      var parentGO = new GameObject("ParentWithStateMachine");
-      var mb = parentGO.AddComponent<TestMonoBehaviourForWrapper>();
-      mb.enabled = true;
-
-      // Create child GameObject (sub-element)
-      var childGO = new GameObject("ChildElement");
-      childGO.transform.SetParent(parentGO.transform);
-      childGO.SetActive(false); // Initially inactive
-
-      // Create managed StateMachine
-      mb.CreateManagedStateMachine(sm =>
-      {
-        var graph = sm.CreateGraph();
-        var idleState = graph.CreateState();
-        graph.InitialUnit = idleState;
-
-        // Setup idle state to activate/deactivate child
-        idleState.OnEnter = () =>
-        {
-          Debug.Log("Idle OnEnter: Activating child");
-          _wrapperTest_StateEntered = true;
-          childGO.SetActive(true); // Activate child when entering idle
-        };
-
-        idleState.OnExit = () =>
-        {
-          Debug.Log("Idle OnExit: Attempting to deactivate child");
-          _wrapperTest_StateExited = true;
-          
-          // Real-world scenario: User doesn't use try-catch
-          // This WILL throw exception if childGO is already destroyed
-          childGO.SetActive(false); // Try to deactivate child when exiting idle
-          Debug.Log("Child deactivated successfully");
-        };
-      });
-
-      yield return null; // Frame 1: SM Starts, idle enters, child activates
-
-      Assert.IsTrue(_wrapperTest_StateEntered, "Idle state did not enter.");
-      Assert.IsTrue(childGO.activeSelf, "Child was not activated on idle enter.");
-
-      // Now destroy the parent (which destroys children first, then triggers wrapper cleanup)
-      // If execution order is: Destroy children → Destroy parent → Wrapper detects → Exit called
-      // Then childGO will be destroyed BEFORE OnExit is called = EXCEPTION
-      Object.DestroyImmediate(parentGO); // This destroys childGO first, then parentGO
-
-      yield return null; // Frame 2: Wrapper detects destruction and calls Exit
-
-      // The OnExit should have been called WITHOUT throwing exception
-      Assert.IsTrue(_wrapperTest_StateExited, "Idle state OnExit was not called.");
-      
-      // If we reach here without exception, the fix is working!
-      // If exception is thrown, Unity Test Framework will catch it and test will FAIL
-    }
-    
-    [UnityTest]
-    public IEnumerator StateMachineWrapper_OnExit_WithDestroyAsync_ExposesTimingIssue()
-    {
-      ResetWrapperTestFlags();
-      
-      // Create parent GameObject with MonoBehaviour
-      var parentGO = new GameObject("ParentWithStateMachine");
-      var mb = parentGO.AddComponent<TestMonoBehaviourForWrapper>();
-      mb.enabled = true;
-
-      // Create child GameObject (sub-element)
-      var childGO = new GameObject("ChildElement");
-      childGO.transform.SetParent(parentGO.transform);
-      childGO.SetActive(false); // Initially inactive
-
-      // Create managed StateMachine
-      mb.CreateManagedStateMachine(sm =>
-      {
-        var graph = sm.CreateGraph();
-        var idleState = graph.CreateState();
-        graph.InitialUnit = idleState;
-
-        // Setup idle state to activate/deactivate child
-        idleState.OnEnter = () =>
-        {
-          Debug.Log("Idle OnEnter: Activating child");
-          _wrapperTest_StateEntered = true;
-          childGO.SetActive(true);
-        };
-
-        idleState.OnExit = () =>
-        {
-          Debug.Log("Idle OnExit: Attempting to deactivate child");
-          _wrapperTest_StateExited = true;
-          
-          // Try to access child - this should be safe even if parent is being destroyed
-          childGO.SetActive(false);
-          Debug.Log("Child deactivated successfully");
-        };
-      });
-
-      yield return null; // Frame 1: SM Starts, idle enters, child activates
-
-      Assert.IsTrue(_wrapperTest_StateEntered, "Idle state did not enter.");
-      Assert.IsTrue(childGO.activeSelf, "Child was not activated on idle enter.");
-
-      // Use async Destroy instead of DestroyImmediate
-      // This might expose different timing issues
-      Object.Destroy(parentGO); // Async destroy - happens at end of frame
-      
-      yield return null; // Frame 2: Destruction happens, wrapper should detect and call Exit
-
-      // The OnExit should have been called WITHOUT throwing exception
-      Assert.IsTrue(_wrapperTest_StateExited, "Idle state OnExit was not called.");
     }
 
     // ---- Tests for StateUnit At and AtEvery ----
@@ -1996,13 +2074,13 @@ namespace Nopnag.StateMachineLib.Tests
     [UnityTest]
     public IEnumerator Subgraph_LifecycleIsCorrect()
     {
-      var  subGraph    = _state1.CreateGraph(); // Use new IGraphHost API
-      var  subStateA   = subGraph.CreateState();
-      var  subStateB   = subGraph.CreateState();
+      var subGraph  = _state1.CreateGraph(); // Use new IGraphHost API
+      var subStateA = subGraph.CreateState();
+      var subStateB = subGraph.CreateState();
 #pragma warning disable CS0219 // Variable is assigned but never used
       bool subAEntered = false, subAUpdated = false, subAExited = false;
 #pragma warning restore CS0219
-      var  subBEntered = false;
+      var subBEntered = false;
 
       subStateA.OnEnter  = () => subAEntered   = true;
       subStateA.OnUpdate = (dt) => subAUpdated = true;
@@ -2036,60 +2114,6 @@ namespace Nopnag.StateMachineLib.Tests
       // Check if subgraph exit was triggered (might need explicit subgraph exit logic check if StateUnit.Exit handles it)
       Assert.IsTrue(_state2Entered, "State2 did not enter after subgraph state exited.");
       Assert.AreEqual(_state2, _graphA.CurrentUnit);
-    }
-
-    [UnityTest]
-    public IEnumerator EventTransition_OnlyActiveStateTransitions_NotChained()
-    {
-      // Setup: stateA > stateB, stateB > stateC, stateC > stateD on same event
-      // Goal: Verify that when event is raised while stateA is active,
-      // ONLY stateA > stateB transition occurs (not a chain to stateC or stateD)
-      
-      var stateA = _graphA.CreateState();
-      var stateB = _graphA.CreateState();
-      var stateC = _graphA.CreateState();
-      var stateD = _graphA.CreateState();
-      
-      bool stateAEntered = false, stateAExited = false;
-      bool stateBEntered = false, stateBExited = false;
-      bool stateCEntered = false, stateCExited = false;
-      bool stateDEntered = false, stateDExited = false;
-      
-      stateA.OnEnter = () => { stateAEntered = true; Debug.Log("StateA Enter"); };
-      stateA.OnExit  = () => { stateAExited  = true; Debug.Log("StateA Exit"); };
-      stateB.OnEnter = () => { stateBEntered = true; Debug.Log("StateB Enter"); };
-      stateB.OnExit  = () => { stateBExited  = true; Debug.Log("StateB Exit"); };
-      stateC.OnEnter = () => { stateCEntered = true; Debug.Log("StateC Enter"); };
-      stateC.OnExit  = () => { stateCExited  = true; Debug.Log("StateC Exit"); };
-      stateD.OnEnter = () => { stateDEntered = true; Debug.Log("StateD Enter"); };
-      stateD.OnExit  = () => { stateDExited  = true; Debug.Log("StateD Exit"); };
-      
-      // Setup transitions all on the same event type
-      (stateA > stateB).On<TestEventA>();
-      (stateB > stateC).On<TestEventA>();
-      (stateC > stateD).On<TestEventA>();
-      
-      _graphA.InitialUnit = stateA;
-      _stateMachine.Start();
-      yield return null;
-      
-      Assert.IsTrue(stateAEntered, "StateA should have entered");
-      Assert.AreEqual(stateA, _graphA.CurrentUnit, "Current state should be stateA");
-      
-      // Raise event while stateA is active
-      EventBus<TestEventA>.Raise(new TestEventA());
-      _stateMachine.UpdateMachine(); // Process event
-      yield return null;
-      
-      // Verify: ONLY stateB transition occurred
-      Assert.IsTrue(stateAExited, "StateA should have exited");
-      Assert.IsTrue(stateBEntered, "StateB should have entered");
-      Assert.AreEqual(stateB, _graphA.CurrentUnit, "Current state should be stateB");
-      
-      // Verify: stateC and stateD were NOT entered (no chain reaction)
-      Assert.IsFalse(stateCEntered, "StateC should NOT have entered (no chain)");
-      Assert.IsFalse(stateDEntered, "StateD should NOT have entered (no chain)");
-      Assert.IsFalse(stateBExited, "StateB should NOT have exited");
     }
 
     [TearDown]
@@ -2284,6 +2308,22 @@ namespace Nopnag.StateMachineLib.Tests
       };
     }
 
+#pragma warning disable CS0414 // Field is assigned but never used
+    bool _actionListenerCalled;
+    bool _anyStatePredicateCondition; // For testing AnyState.When
+    bool _eventAListenerCalled, _eventBListenerCalled, _damageListenerCalled;
+
+    StateGraph _graphA, _graphB;                                  // For parallel graph tests
+    StateUnit  _state1, _state2, _state3, _stunnedState, _state4; // Added _state4 for more states
+
+    bool  _state1Entered,     _state1Updated,     _state1Exited;
+    int   _state1UpdateCount, _state2UpdateCount, _state3UpdateCount, _state4UpdateCount;
+    float _state1UpdateTime,  _state2UpdateTime,  _state3UpdateTime,  _state4UpdateTime;
+    bool  _state2Entered,     _state2Updated,     _state2Exited;
+    bool  _state3Entered,     _state3Updated,     _state3Exited;
+    bool  _state4Entered,     _state4Updated,     _state4Exited; // Added flags for _state4
+#pragma warning restore CS0414
+
     // Removed AnyState_Operator_Now_TransitionsImmediately test method
     // ---- End of StateMachineWrapper Tests ----
   } // This is the original closing brace of StateMachineTests class
@@ -2415,12 +2455,12 @@ namespace Nopnag.StateMachineLib.Tests
       // Need to use local variables for states and listener for this test scope
 #pragma warning disable CS8600 // Converting null literal or possible null value to non-nullable type
 #pragma warning disable CS8625 // Cannot convert null literal to non-nullable reference type
-      StateUnit local_s1        = null;
-      StateUnit local_s2        = null;
-      StateGraph local_graph    = null;
+      StateUnit  local_s1    = null;
+      StateUnit  local_s2    = null;
+      StateGraph local_graph = null;
 #pragma warning restore CS8625
 #pragma warning restore CS8600
-      var       local_callCount = 0;
+      var local_callCount = 0;
       ListenerDelegate<TestEvent> local_listener = e =>
       {
         Debug.Log("Local call in WrapperDispose");
@@ -2430,9 +2470,9 @@ namespace Nopnag.StateMachineLib.Tests
       // Initialize with callback (setup happens inside, then auto-Start)
       testMb.InitializeStateMachine(sm =>
       {
-        local_graph = sm.CreateGraph();
-        local_s1          = local_graph.CreateState();
-        local_s2          = local_graph.CreateState();
+        local_graph             = sm.CreateGraph();
+        local_s1                = local_graph.CreateState();
+        local_s2                = local_graph.CreateState();
         local_graph.InitialUnit = local_s1;
         local_s1.On<TestEvent>(local_listener);
         (local_s1 > local_s2).On<TestEvent>();
@@ -2445,7 +2485,8 @@ namespace Nopnag.StateMachineLib.Tests
 
       yield return null; // Allow SM to process Start
 
-      Debug.Log("Current unit after Start and yield in WrapperDispose: " + local_graph.CurrentUnit?.Name);
+      Debug.Log("Current unit after Start and yield in WrapperDispose: " +
+                local_graph.CurrentUnit?.Name);
       Assert.IsTrue(local_s1.IsActive,
         "DisposalTest: Wrapper - local_s1 should be active after Start and before raising event.");
 

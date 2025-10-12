@@ -23,7 +23,7 @@ namespace Nopnag.StateMachineLib.Transition
         {
           if (sourceUnit.BaseGraph != null && sourceUnit.BaseGraph.IsUnitActive(sourceUnit)) 
           {
-            sourceUnit.BaseGraph.StartState(targetUnit);
+            sourceUnit.BaseGraph.StartState(targetUnit, @event.RaiseUniqueId);
           }
         }
       );
@@ -37,7 +37,7 @@ namespace Nopnag.StateMachineLib.Transition
           {
             if (sourceUnit.BaseGraph != null && sourceUnit.BaseGraph.IsUnitActive(sourceUnit)) 
             {
-              sourceUnit.BaseGraph.StartState(targetUnit);
+              sourceUnit.BaseGraph.StartState(targetUnit, @event.RaiseUniqueId);
             }
           }
         );
@@ -59,7 +59,7 @@ namespace Nopnag.StateMachineLib.Transition
         {
           if (sourceUnit.BaseGraph != null && sourceUnit.BaseGraph.IsUnitActive(sourceUnit) && predicate(@event)) 
           {
-            sourceUnit.BaseGraph.StartState(targetUnit);
+            sourceUnit.BaseGraph.StartState(targetUnit, @event.RaiseUniqueId);
           }
         }
       );
@@ -73,7 +73,7 @@ namespace Nopnag.StateMachineLib.Transition
           {
             if (sourceUnit.BaseGraph != null && sourceUnit.BaseGraph.IsUnitActive(sourceUnit) && predicate(@event)) 
             {
-              sourceUnit.BaseGraph.StartState(targetUnit);
+              sourceUnit.BaseGraph.StartState(targetUnit, @event.RaiseUniqueId);
             }
           }
         );
@@ -95,7 +95,7 @@ namespace Nopnag.StateMachineLib.Transition
         {
           if (sourceUnit.BaseGraph != null && sourceUnit.BaseGraph.IsUnitActive(sourceUnit)) 
           {
-            sourceUnit.BaseGraph.StartState(targetUnit);
+            sourceUnit.BaseGraph.StartState(targetUnit, @event.RaiseUniqueId);
           }
         }
       );
@@ -109,7 +109,7 @@ namespace Nopnag.StateMachineLib.Transition
           {
             if (sourceUnit.BaseGraph != null && sourceUnit.BaseGraph.IsUnitActive(sourceUnit)) 
             {
-              sourceUnit.BaseGraph.StartState(targetUnit);
+              sourceUnit.BaseGraph.StartState(targetUnit, @event.RaiseUniqueId);
             }
           }
         );
@@ -132,7 +132,7 @@ namespace Nopnag.StateMachineLib.Transition
         {
           if (sourceUnit.BaseGraph != null && sourceUnit.BaseGraph.IsUnitActive(sourceUnit) && predicate(@event)) 
           {
-            sourceUnit.BaseGraph.StartState(targetUnit);
+            sourceUnit.BaseGraph.StartState(targetUnit, @event.RaiseUniqueId);
           }
         }
       );
@@ -146,7 +146,7 @@ namespace Nopnag.StateMachineLib.Transition
           {
             if (sourceUnit.BaseGraph != null && sourceUnit.BaseGraph.IsUnitActive(sourceUnit) && predicate(@event)) 
             {
-              sourceUnit.BaseGraph.StartState(targetUnit);
+              sourceUnit.BaseGraph.StartState(targetUnit, @event.RaiseUniqueId);
             }
           }
         );
@@ -166,7 +166,7 @@ namespace Nopnag.StateMachineLib.Transition
         {
           if (graphContext.IsGraphActive) 
           {
-            graphContext.StartState(targetUnit);
+            graphContext.StartState(targetUnit, @event.RaiseUniqueId);
           }
         }
       );
@@ -180,7 +180,7 @@ namespace Nopnag.StateMachineLib.Transition
           {
             if (graphContext.IsGraphActive) 
             {
-              graphContext.StartState(targetUnit);
+              graphContext.StartState(targetUnit, @event.RaiseUniqueId);
             }
           }
         );
@@ -201,7 +201,7 @@ namespace Nopnag.StateMachineLib.Transition
         {
           if (graphContext.IsGraphActive && predicate(@event)) 
           {
-            graphContext.StartState(targetUnit);
+            graphContext.StartState(targetUnit, @event.RaiseUniqueId);
           }
         }
       );
@@ -215,7 +215,7 @@ namespace Nopnag.StateMachineLib.Transition
           {
             if (graphContext.IsGraphActive && predicate(@event)) 
             {
-              graphContext.StartState(targetUnit);
+              graphContext.StartState(targetUnit, @event.RaiseUniqueId);
             }
           }
         );
@@ -236,7 +236,7 @@ namespace Nopnag.StateMachineLib.Transition
         {
           if (graphContext.IsGraphActive) 
           {
-            graphContext.StartState(targetUnit);
+            graphContext.StartState(targetUnit, @event.RaiseUniqueId);
           }
         }
       );
@@ -250,7 +250,7 @@ namespace Nopnag.StateMachineLib.Transition
           {
             if (graphContext.IsGraphActive) 
             {
-              graphContext.StartState(targetUnit);
+              graphContext.StartState(targetUnit, @event.RaiseUniqueId);
             }
           }
         );
@@ -272,7 +272,7 @@ namespace Nopnag.StateMachineLib.Transition
         {
           if (graphContext.IsGraphActive && predicate(@event)) 
           {
-            graphContext.StartState(targetUnit);
+            graphContext.StartState(targetUnit, @event.RaiseUniqueId);
           }
         }
       );
@@ -286,7 +286,7 @@ namespace Nopnag.StateMachineLib.Transition
           {
             if (graphContext.IsGraphActive && predicate(@event)) 
             {
-              graphContext.StartState(targetUnit);
+              graphContext.StartState(targetUnit, @event.RaiseUniqueId);
             }
           }
         );
