@@ -546,6 +546,96 @@ namespace Nopnag.StateMachineLib.Tests
     }
 
     [UnityTest]
+    public IEnumerator EventTransition_SecondEventRaise_AllowsTransition()
+    {
+      // Goal: Verify that raising the SAME event TYPE a second time (new instance, new RaiseUniqueId)
+      // DOES allow transition from StateB to StateC
+      
+      var stateA = _graphA.CreateState();
+      var stateB = _graphA.CreateState();
+      var stateC = _graphA.CreateState();
+      var stateD = _graphA.CreateState();
+
+      bool stateAEntered = false, stateAExited = false;
+      bool stateBEntered = false, stateBExited = false;
+      bool stateCEntered = false, stateCExited = false;
+      bool stateDEntered = false, stateDExited = false;
+
+      stateA.OnEnter = () =>
+      {
+        stateAEntered = true;
+        Debug.Log("StateA Enter");
+      };
+      stateA.OnExit = () =>
+      {
+        stateAExited = true;
+        Debug.Log("StateA Exit");
+      };
+      stateB.OnEnter = () =>
+      {
+        stateBEntered = true;
+        Debug.Log("StateB Enter");
+      };
+      stateB.OnExit = () =>
+      {
+        stateBExited = true;
+        Debug.Log("StateB Exit");
+      };
+      stateC.OnEnter = () =>
+      {
+        stateCEntered = true;
+        Debug.Log("StateC Enter");
+      };
+      stateC.OnExit = () =>
+      {
+        stateCExited = true;
+        Debug.Log("StateC Exit");
+      };
+      stateD.OnEnter = () =>
+      {
+        stateDEntered = true;
+        Debug.Log("StateD Enter");
+      };
+      stateD.OnExit = () =>
+      {
+        stateDExited = true;
+        Debug.Log("StateD Exit");
+      };
+
+      // Setup transitions all on the same event type
+      (stateA > stateB).On<TestEventA>();
+      (stateB > stateC).On<TestEventA>();
+      (stateC > stateD).On<TestEventA>();
+
+      _graphA.InitialUnit = stateA;
+      _stateMachine.Start();
+
+      Assert.IsTrue(stateAEntered, "StateA should have entered");
+      Assert.AreEqual(stateA, _graphA.CurrentUnit, "Current state should be stateA");
+
+      // FIRST event raise: StateA -> StateB (no chain)
+      EventBus<TestEventA>.Raise(new TestEventA());
+
+      Assert.IsTrue(stateAExited, "StateA should have exited");
+      Assert.IsTrue(stateBEntered, "StateB should have entered");
+      Assert.AreEqual(stateB, _graphA.CurrentUnit, "Current state should be stateB");
+      Assert.IsFalse(stateCEntered, "StateC should NOT have entered (first raise)");
+
+      // SECOND event raise: Now StateB -> StateC should work (new RaiseUniqueId)
+      EventBus<TestEventA>.Raise(new TestEventA());
+
+      // Verify: StateC transition SHOULD occur now
+      Assert.IsTrue(stateBExited, "StateB should have exited (second raise)");
+      Assert.IsTrue(stateCEntered, "StateC SHOULD have entered (second raise, new event instance)");
+      Assert.AreEqual(stateC, _graphA.CurrentUnit, "Current state should be stateC");
+      
+      // StateD should NOT have entered (same event, no chain)
+      Assert.IsFalse(stateDEntered, "StateD should NOT have entered (no chain on second raise)");
+      
+      yield return null;
+    }
+
+    [UnityTest]
     public IEnumerator FluentAPI_After_WorksAfterDuration()
     {
       var  graph    = _stateMachine.CreateGraph();
