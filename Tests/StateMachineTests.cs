@@ -2038,6 +2038,60 @@ namespace Nopnag.StateMachineLib.Tests
       Assert.AreEqual(_state2, _graphA.CurrentUnit);
     }
 
+    [UnityTest]
+    public IEnumerator EventTransition_OnlyActiveStateTransitions_NotChained()
+    {
+      // Setup: stateA > stateB, stateB > stateC, stateC > stateD on same event
+      // Goal: Verify that when event is raised while stateA is active,
+      // ONLY stateA > stateB transition occurs (not a chain to stateC or stateD)
+      
+      var stateA = _graphA.CreateState();
+      var stateB = _graphA.CreateState();
+      var stateC = _graphA.CreateState();
+      var stateD = _graphA.CreateState();
+      
+      bool stateAEntered = false, stateAExited = false;
+      bool stateBEntered = false, stateBExited = false;
+      bool stateCEntered = false, stateCExited = false;
+      bool stateDEntered = false, stateDExited = false;
+      
+      stateA.OnEnter = () => { stateAEntered = true; Debug.Log("StateA Enter"); };
+      stateA.OnExit  = () => { stateAExited  = true; Debug.Log("StateA Exit"); };
+      stateB.OnEnter = () => { stateBEntered = true; Debug.Log("StateB Enter"); };
+      stateB.OnExit  = () => { stateBExited  = true; Debug.Log("StateB Exit"); };
+      stateC.OnEnter = () => { stateCEntered = true; Debug.Log("StateC Enter"); };
+      stateC.OnExit  = () => { stateCExited  = true; Debug.Log("StateC Exit"); };
+      stateD.OnEnter = () => { stateDEntered = true; Debug.Log("StateD Enter"); };
+      stateD.OnExit  = () => { stateDExited  = true; Debug.Log("StateD Exit"); };
+      
+      // Setup transitions all on the same event type
+      (stateA > stateB).On<TestEventA>();
+      (stateB > stateC).On<TestEventA>();
+      (stateC > stateD).On<TestEventA>();
+      
+      _graphA.InitialUnit = stateA;
+      _stateMachine.Start();
+      yield return null;
+      
+      Assert.IsTrue(stateAEntered, "StateA should have entered");
+      Assert.AreEqual(stateA, _graphA.CurrentUnit, "Current state should be stateA");
+      
+      // Raise event while stateA is active
+      EventBus<TestEventA>.Raise(new TestEventA());
+      _stateMachine.UpdateMachine(); // Process event
+      yield return null;
+      
+      // Verify: ONLY stateB transition occurred
+      Assert.IsTrue(stateAExited, "StateA should have exited");
+      Assert.IsTrue(stateBEntered, "StateB should have entered");
+      Assert.AreEqual(stateB, _graphA.CurrentUnit, "Current state should be stateB");
+      
+      // Verify: stateC and stateD were NOT entered (no chain reaction)
+      Assert.IsFalse(stateCEntered, "StateC should NOT have entered (no chain)");
+      Assert.IsFalse(stateDEntered, "StateD should NOT have entered (no chain)");
+      Assert.IsFalse(stateBExited, "StateB should NOT have exited");
+    }
+
     [TearDown]
     public void Teardown()
     {
