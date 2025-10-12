@@ -31,6 +31,10 @@ namespace Nopnag.StateMachineLib
     readonly List<IStateTransition> _anyStateTransitions = new();
     StateUnit _currentUnit;
     List<IIListener> _graphEventTransitionListeners = new();
+    
+    // Track the RaiseUniqueId that caused entry into the current state
+    // to prevent event transition chaining (same event causing multiple transitions)
+    long _currentStateEntryRaiseId = 0;
 
     // IGraphHost implementation
     readonly GraphHost _graphHost;
@@ -228,7 +232,7 @@ namespace Nopnag.StateMachineLib
       CurrentUnit?.LateUpdate();
     }
 
-    public void StartState(StateUnit unit)
+    public void StartState(StateUnit unit, long raiseUniqueId = 0)
     {
       if (_isDisposedByParent) throw new ObjectDisposedException(nameof(StateGraph));
       if (unit == null)
@@ -237,8 +241,16 @@ namespace Nopnag.StateMachineLib
         return;
       }
 
+      // Prevent event transition chaining: if this transition is triggered by the same event
+      // that caused entry into the current state, ignore it
+      if (raiseUniqueId != 0 && raiseUniqueId == _currentStateEntryRaiseId)
+      {
+        return; // Same event cannot both enter and exit a state
+      }
+
       CurrentUnit?.Exit();
       CurrentUnit = unit;
+      _currentStateEntryRaiseId = raiseUniqueId; // Track the event ID that caused this state entry
       CurrentUnit.Start();
     }
 
