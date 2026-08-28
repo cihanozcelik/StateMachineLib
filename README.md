@@ -104,6 +104,8 @@ state1.On<MyGameEvent>(evt => { /* Handle MyGameEvent */ });
     *   Events propagate downwards to hosted graphs.
 *   **Dual Event Listening:** 
     *   `StateUnit.On<TEvent>()` and event-based transitions (`(s1 > s2).On<TEvent>()`) automatically listen to both global `EventBus` events and relevant `LocalEventBus` events from their parent `IGraphHost`(s).
+    *   This is intentional: event scope is expressed by where the producer raises the event and by the event type's name, rather than by separate `OnLocal` and `OnGlobal` transition APIs.
+    *   An event type designed exclusively for local delivery must make that scope explicit in its name, for example `LocalAttackRequestedEvent` or `CharacterLocalAttackRequestedEvent`, and producers must raise it through the owning hierarchy's `LocalRaise(...)` API rather than the global `EventBus`.
 *   **One Event Transition Per Graph Per Raise:**
     *   A single event raise can cause at most one event-driven transition in each `StateGraph`.
     *   This guarantee applies to transitions both with and without predicates. A predicate belonging to the newly entered state is not evaluated for the same raise.
@@ -116,6 +118,23 @@ state1.On<MyGameEvent>(evt => { /* Handle MyGameEvent */ });
 *   **Rich Transition System:** Fluent API for time-based, event-based, conditional, and immediate transitions.
 *   **Parallel Graphs:** `StateMachine` can manage multiple top-level `StateGraph`s.
 *   **Time-Based Callbacks:** `StateUnit.At()` and `StateUnit.AtEvery()` for timed actions within a state.
+
+### Local-Only Event Naming Pattern
+
+State listeners and event transitions deliberately use the same event type for global and local delivery. When an event belongs only to one character, weapon, or state-machine hierarchy, encode that restriction in the event type name and publish it locally:
+
+```csharp
+public sealed class CharacterLocalAttackRequestedEvent : BusEvent
+{
+}
+
+(ready > attacking).On<CharacterLocalAttackRequestedEvent>();
+
+// Correct for this local-only event type:
+characterStateMachine.LocalRaise(new CharacterLocalAttackRequestedEvent());
+```
+
+Do not globally raise an event type whose name declares it local-only. This naming and publishing convention keeps the fluent transition API uniform while making event scope visible at every usage site.
 
 ## Main Concepts
 
