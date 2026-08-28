@@ -1,741 +1,885 @@
 # Nopnag StateMachineLib
 
-A lightweight and flexible state machine library for C# and Unity, designed for managing game logic flow.
+StateMachineLib is a Unity state-flow library with parallel graphs, state-owned
+hierarchical graphs, polling and event-driven transitions, local event propagation,
+independent Update/FixedUpdate clocks, and an optional `MonoBehaviour` lifecycle
+wrapper.
 
-## 🚀 Getting Started
+This README documents the supported public API for StateMachineLib `2.0.0`. Open
+implementation defects and unsafe advanced paths are tracked separately in
+[KNOWN_ISSUES.md](KNOWN_ISSUES.md). A known issue is not a supported usage
+recommendation.
 
-After cloning this repository, run the following command to set up git hooks:
+## Quick navigation
+
+- [Choose manual or managed lifecycle](#choose-the-lifecycle-model-explicitly)
+- [Understand ownership](#core-model-and-ownership)
+- [Callbacks and execution order](#state-callbacks-and-exact-execution-order)
+- [Time and timers](#time-and-timer-api)
+- [Transitions](#transition-api)
+- [Events](#state-scoped-event-listeners)
+- [Graph lifetime](#graph-attachment-and-detachment)
+- [Public API reference](#public-api-reference)
+- [Attention checklist](#attention-checklist)
+
+## Installation
+
+| Package | Value |
+|---|---|
+| Unity package name | `com.nopnag.statemachinelib` |
+| Package version | `2.0.0` |
+| Declared minimum Unity version | `6000.1` |
+| Runtime namespace | `Nopnag.StateMachineLib` |
+| Runtime assembly | `Nopnag.StateMachineLib.Runtime` |
+
+StateMachineLib requires EventBusLib. The package manifest currently declares:
+
+```json
+{
+  "dependencies": {
+    "com.nopnag.eventbuslib": "1.1.0"
+  }
+}
+```
+
+Install the package through Unity Package Manager with the repository URL, or add it
+to the consuming project's `Packages/manifest.json`:
+
+```json
+{
+  "dependencies": {
+    "com.nopnag.statemachinelib":
+      "https://github.com/cihanozcelik/StateMachineLib.git#<tested-revision>"
+  }
+}
+```
+
+Pin an exact tested revision in production projects rather than following a moving
+branch. Ensure the pinned StateMachineLib revision is compatible with the installed
+EventBusLib revision.
+
+Repository contributors can install the local push-protection hooks with:
 
 ```bash
 .githooks/install.sh
 ```
 
-This configures git to prevent direct pushes to the `main` branch. All changes must go through feature branches and pull requests.
+## Choose the lifecycle model explicitly
 
-## Overview
+The library supports two valid integration models. Managed auto-start is optional.
 
-StateMachineLib provides tools to structure application logic into distinct states and define transitions between them. It allows for multiple state graphs running concurrently, supports hierarchical state machines (subgraphs), dynamic graph attachment/detachment, and a local event system alongside global event integration.
+### Manual `StateMachine`
 
-## API Usage Quick Reference
-
-```csharp
-// --- Core Setup & Lifecycle ---
-StateMachine stateMachine = new StateMachine();
-StateGraph mainGraph = stateMachine.CreateGraph(); // Creates a graph hosted by the StateMachine
-StateUnit state1 = mainGraph.CreateState(); // Preferred: Creates a state. Name is managed by user if needed.
-mainGraph.InitialUnit = state1; // Or first created state is initial by default.
-
-// Activate/Deactivate a graph
-// Graphs created via stateMachine.CreateGraph() or stateUnit.CreateGraph() are turned on by default.
-mainGraph.SetTurnedOn(false); // Explicitly deactivate a graph
-mainGraph.SetTurnedOn(true);  // Reactivate it
-
-stateMachine.Start(); // Enters initial state of all 'turned on' and 'powered' graphs.
-stateMachine.UpdateMachine();       // Call in game loop (e.g., Unity's Update)
-stateMachine.FixedUpdateMachine();  // Call in game loop (e.g., Unity's FixedUpdate)
-stateMachine.LateUpdateMachine();   // Call in game loop (e.g., Unity's LateUpdate)
-stateMachine.Exit(); // Exits all graphs and their current states. Power state is also turned off.
-// Important: Call when StateMachine is no longer needed if not using a wrapper like StateMachineMB.
-stateMachine.Dispose(); 
-
-// --- Hierarchical Graphs (Subgraphs) ---
-// StateUnits can host subgraphs because StateUnit implements IGraphHost
-StateUnit parentStateHostingSubgraph = mainGraph.CreateState();
-StateGraph subGraph = parentStateHostingSubgraph.CreateGraph(); // Create a new subgraph under parentStateHostingSubgraph
-StateUnit childStateInSubgraph = subGraph.CreateState();
-subGraph.InitialUnit = childStateInSubgraph;
-// Subgraphs can also host their own subgraphs, creating deeper hierarchies.
-StateGraph subSubGraph = childStateInSubgraph.CreateGraph(); 
-// ...
-
-// --- Dynamic Graph Management (Attach/Detach) ---
-// Create a graph independently
-StateGraph independentGraph = new StateGraph();
-StateUnit someIndependentState = independentGraph.CreateState();
-independentGraph.InitialUnit = someIndependentState;
-// ... configure independentGraph ...
-
-// Attach it to the StateMachine or a StateUnit
-stateMachine.AttachGraph(independentGraph); // Becomes a top-level graph
-// parentStateHostingSubgraph.AttachGraph(anotherIndependentGraph); // Attaches under the parentState
-
-// Detach a graph (preserves its current state, makes it inactive, disconnects power)
-stateMachine.DetachGraph(independentGraph);
-// parentStateHostingSubgraph.DetachGraph(subGraph);
-
-// --- Local Event System ---
-// StateMachine and StateUnit (if hosting graphs) act as IGraphHost and have a LocalEventBus
-stateMachine.LocalRaise(new MyGameEvent()); // Event propagates to graphs hosted by stateMachine
-parentStateHostingSubgraph.LocalRaise(new MySubEvent()); // Event propagates to subGraph
-
-// --- StateUnit Logic Actions (OnEnter, OnUpdate, OnExit, etc.) ---
-state1.OnEnter = () => { /* Logic for state1 Enter */ };
-state1.OnUpdate = (timeInState) => { /* Logic for state1 Update */ };
-// ... (similarly for OnExit, OnFixedUpdate, OnLateUpdate)
-
-// --- Time-Based Callbacks (within StateUnit) ---
-state1.At(2.0f, () => { /* Action after 2 seconds in state1 */ });
-state1.AtEvery(1.0f, () => { /* Action every 1 second in state1 */ });
-
-// --- Event Listening (within StateUnit, for EventBus events) ---
-// state.On<MyEvent>() listens to both global EventBus and relevant LocalEventBus events
-state1.On<MyGameEvent>(evt => { /* Handle MyGameEvent */ });
-
-// --- Fluent Transition Creation API (Examples) ---
-(state1 > childStateInSubgraph).When(elapsedTime => elapsedTime > 1.0f);
-(childStateInSubgraph > state1).On<MyGameEvent>();
-(StateGraph.Any > state1).Immediately(); // Any-state transition within a graph
-```
-
-## Key Features
-
-*   **Hierarchical State Machines (Subgraphs):** 
-    *   `StateUnit`s can host their own `StateGraph`s (`StateUnit` implements `IGraphHost`).
-    *   This allows for deeply nested state logic (graphs within graphs).
-*   **Dynamic Graph Management:**
-    *   **Attach/Detach:** `StateGraph`s can be dynamically attached (`AttachGraph()`) to or detached (`DetachGraph()`) from an `IGraphHost` (like `StateMachine` or `StateUnit`) at runtime.
-    *   Detaching preserves the graph's current state but makes it inactive. It can be re-attached later to resume.
-    *   Graphs can be created independently and then attached to an existing state hierarchy.
-*   **Activation Control (`SetTurnedOn`):** 
-    *   `StateGraph`s (and `StateMachine`s) can be individually turned on/off using `SetTurnedOn(bool)`.
-    *   A graph only receives updates and processes events if it's turned on and its parent in the power hierarchy is also active.
-*   **Local Event System (`LocalRaise`):**
-    *   `StateMachine` and `StateUnit` (when acting as `IGraphHost`) provide `LocalRaise<T>(T busEvent)` to dispatch events within their own hierarchy.
-    *   Events propagate downwards to hosted graphs.
-*   **Dual Event Listening:** 
-    *   `StateUnit.On<TEvent>()` and event-based transitions (`(s1 > s2).On<TEvent>()`) automatically listen to both global `EventBus` events and relevant `LocalEventBus` events from their parent `IGraphHost`(s).
-    *   This is intentional: event scope is expressed by where the producer raises the event and by the event type's name, rather than by separate `OnLocal` and `OnGlobal` transition APIs.
-    *   An event type designed exclusively for local delivery must make that scope explicit in its name, for example `LocalAttackRequestedEvent` or `CharacterLocalAttackRequestedEvent`, and producers must raise it through the owning hierarchy's `LocalRaise(...)` API rather than the global `EventBus`.
-*   **One Event Transition Per Graph Per Raise:**
-    *   A single event raise can cause at most one event-driven transition in each `StateGraph`.
-    *   This guarantee applies to transitions both with and without predicates. A predicate belonging to the newly entered state is not evaluated for the same raise.
-    *   The guard is graph-local. The event is not stopped and remains available to parallel graphs and other state machines.
-*   **Lifecycle Management (`Dispose`):**
-    *   `StateMachine` should be disposed via `Dispose()` when no longer needed (if not using a managed wrapper like `StateMachineMB`) to clean up resources and event subscriptions.
-    *   Disposing a `StateMachine` (or a `StateUnit` hosting graphs) will also dispose of all its hosted graphs.
-    *   Detached graphs are no longer managed by their previous host; if not re-attached and referenced, they are eligible for GC.
-*   **Simplified State Creation:** `StateGraph.CreateState()` is the preferred way to create `StateUnit`s.
-*   **Rich Transition System:** Fluent API for time-based, event-based, conditional, and immediate transitions.
-*   **Parallel Graphs:** `StateMachine` can manage multiple top-level `StateGraph`s.
-*   **Time-Based Callbacks:** `StateUnit.At()` and `StateUnit.AtEvery()` for timed actions within a state.
-
-### Local-Only Event Naming Pattern
-
-State listeners and event transitions deliberately use the same event type for global and local delivery. When an event belongs only to one character, weapon, or state-machine hierarchy, encode that restriction in the event type name and publish it locally:
+Use `new StateMachine()` when another owner already controls initialization, ticking,
+pause, shutdown, or dependency-injection lifetime.
 
 ```csharp
-public sealed class CharacterLocalAttackRequestedEvent : BusEvent
-{
-}
-
-(ready > attacking).On<CharacterLocalAttackRequestedEvent>();
-
-// Correct for this local-only event type:
-characterStateMachine.LocalRaise(new CharacterLocalAttackRequestedEvent());
-```
-
-Do not globally raise an event type whose name declares it local-only. This naming and publishing convention keeps the fluent transition API uniform while making event scope visible at every usage site.
-
-## Main Concepts
-
-*   **`StateMachine`**: The top-level container. It holds and manages one or more `StateGraph` instances, propagating `Update`, `LateUpdate`, and `FixedUpdate` calls to them.
-    ```csharp
-    // In your MonoBehaviour or main logic class
-    StateMachine stateMachine = new StateMachine();
-    ```
-
-*   **`StateGraph`**: Represents a single state machine graph. It manages a collection of `StateUnit` instances, keeps track of the `CurrentUnit`, and handles entering/exiting the graph and starting specific states.
-    ```csharp
-    StateGraph mainGraph = stateMachine.CreateGraph();
-    
-    // Creating states:
-    StateUnit unnamedState = mainGraph.CreateState(); // Preferred: Creates a state (name will be null by default).
-    // StateUnit namedState = mainGraph.CreateUnit("MyNamedState"); // Deprecated: Creates a state with a specific name.
-    ```
-
-*   **`StateUnit`**: Represents a single state within a `StateGraph`. You assign behavior to it by setting its various `Action` properties (e.g., `OnEnter`, `OnUpdate`). The older `Action`-suffixed fields (e.g., `EnterStateFunction`) are now deprecated. It contains a list of potential `Transitions` which are checked during its `Update` loop.
-    ```csharp
-    // Using preferred CreateState():
-    StateUnit idleState = mainGraph.CreateState(); 
-    // If you need to identify the state for debugging/logging, you can manage that externally or rely on its object reference.
-    // idleState.Name will be null if created with CreateState().
-
-    // If using the deprecated CreateUnit(name) for legacy reasons or specific identification:
-    // StateUnit namedIdleState = mainGraph.CreateUnit("Idle"); 
-    // namedIdleState.Name will be "Idle".
-
-    idleState.OnEnter = () => Debug.Log("Idling..."); // Preferred way to assign actions
-    idleState.OnUpdate = (timeInState) => { /* Do idle stuff. timeInState is DeltaTimeSinceStart */ }; // Preferred
-    
-    // Older, deprecated way of assigning actions:
-    // idleState.EnterStateFunction = () => Debug.Log("Idling..."); 
-    // idleState.UpdateStateFunction = (timeInState) => { /* Do idle stuff. timeInState is DeltaTimeSinceStart */ };
-    ```
-
-*   **`IStateTransition`**: The interface for all transition types that are checked during the `Update` loop of a `StateUnit`. Defines the `CheckTransition` method. (Event/Action based transitions trigger more directly).
-
-## Listening to EventBus Events Only While a State is Active
-
-A powerful feature of StateMachineLib is the ability to listen to `EventBusLib` events only while a specific state is active. This is achieved using the `StateUnit.On` methods. The older `Listen` method for events is now deprecated.
-
-### EventBus Event Listening (Basic Usage)
-```csharp
-// Listen to all MyEvent events, but only while this state is active
-// myState.Listen<MyEvent>(...); // Deprecated
-myState.On<MyEvent>(evt => { // Preferred
-    Debug.Log($"MyEvent received in state: {myState.Name}");
-});
-```
-
-### EventBus Event Listening (Parameter-Filtered with EventQuery)
-```csharp
-// Listen to MyEvent events with a specific parameter, only while this state is active
-var query = EventBus<MyEvent>.Where<MyParam>(myValue);
-// myState.Listen(query, ...); // Deprecated
-myState.On(query, evt => { // Preferred
-    Debug.Log($"MyEvent with param received in state: {myState.Name}");
-});
-```
-
-**Why is this important?**
-- The callback is only invoked if the state is currently active, so you don't need to manually unsubscribe or check state inside the handler.
-- With the `EventQuery` overload for EventBus events, you can listen to only a subset of events (e.g., only those with a certain parameter value), making your state logic more precise and efficient.
-
-## Event Raise Isolation Guarantee
-
-Every EventBus dispatch has a `RaiseUniqueId`. StateMachineLib uses that identifier independently in each `StateGraph` to guarantee that one raise cannot advance the same graph through multiple states.
-
-```csharp
-(stateA > stateB).On<AdvanceEvent>();
-(stateB > stateC).On<AdvanceEvent>();
-```
-
-Raising one `AdvanceEvent` while `stateA` is active performs only `stateA -> stateB`. It never continues with `stateB -> stateC` during that dispatch. A second, separate raise receives a new identifier and may then perform `stateB -> stateC`.
-
-The same guarantee applies when transitions have predicates:
-
-```csharp
-(stateA > stateB).On<AdvanceEvent>();
-(stateB > stateC).On<AdvanceEvent>(evt => EvaluateForStateB(evt));
-```
-
-After the first transition enters `stateB`, `EvaluateForStateB` is not called for that same raise. The guard runs before the predicate, so rejected secondary transitions cannot produce predicate side effects. A `stateB.On<AdvanceEvent>(handler)` state listener is likewise not invoked merely because `stateB` became active during that raise.
-
-This behavior is local to each graph. StateMachineLib does not call `StopPropagation()` to enforce it. The same event may still transition other parallel graphs or graphs in other state machines once each:
-
-```csharp
-(movementIdle > movementReady).On<GameStarted>();
-(combatIdle > combatReady).On<GameStarted>();
-
-EventBus.Raise(gameStarted); // Both graphs may transition.
-```
-
-## Advanced Features
-
-### Parallel State Graphs
-
-The `StateMachine` class can manage multiple `StateGraph` instances simultaneously. Each graph runs independently but is updated by the main `StateMachine` update calls (`UpdateMachine`, `FixedUpdateMachine`, etc.). This is useful for managing distinct aspects of an object or system concurrently.
-
-```csharp
-// In your setup
-StateMachine characterStateMachine = new StateMachine();
-
-// Graph for movement logic
-StateGraph movementGraph = characterStateMachine.CreateGraph(); 
-// ... define movement states and transitions ...
-
-// Graph for combat logic
-StateGraph combatGraph = characterStateMachine.CreateGraph();
-// ... define combat states and transitions ...
-
-// Start both graphs
-characterStateMachine.Start();
-
-// In Update loop, both graphs will be updated
-void Update()
-{
-    characterStateMachine.UpdateMachine(); 
-}
-```
-
-### Subgraphs / Hierarchical State Machines
-
-A `StateUnit` can contain its own nested `StateGraph`, allowing for more complex and organized state logic. When the parent `StateUnit` is active, its subgraph is also active and updated.
-
-```csharp
-// In your setup
-StateGraph mainGraph = stateMachine.CreateGraph();
-StateUnit combatState = mainGraph.CreateState();
-StateUnit patrollingState = mainGraph.CreateState();
-
-// Method 1: Create subgraph directly (Recommended for simple cases)
-StateGraph combatSubgraph = combatState.GetSubStateGraph(); // Automatically gets LocalEventBus support
-
-// Method 2: Create subgraph elsewhere and attach (Flexible approach)
-StateGraph detailedCombatGraph = new StateGraph(); // Created independently
-StateUnit aimingState = detailedCombatGraph.CreateState();
-StateUnit shootingState = detailedCombatGraph.CreateState();
-// ... define transitions within detailedCombatGraph ...
-combatState.SetSubStateGraph(detailedCombatGraph); // Automatically gets LocalEventBus support when attached
-
-// Method 3: Manual StateMachine reference (Advanced usage)
-StateGraph manualGraph = new StateGraph();
-manualGraph.SetParentStateMachine(stateMachine); // Explicit LocalEventBus support
-// ... setup states and transitions ...
-
-// Define transition into the combat state using the fluent API
-// (patrollingState > combatState).On<EnemyDetectedEvent>(); // Example using Fluent API
-
-// ... other setup ...
-
-stateMachine.Start();
-
-// When patrollingState transitions to combatState:
-// 1. combatState.OnEnter runs.
-// 2. combatSubgraph.EnterGraph() runs, starting its initial state (e.g., aimingState).
-// 3. While combatState is active, combatSubgraph is updated via combatState's Update/FixedUpdate/LateUpdate.
-// 4. All subgraphs have access to the same LocalEventBus as the parent StateMachine.
-```
-
-### Time-Based Callbacks within States
-
-`StateUnit` provides convenient methods to schedule actions based on the time elapsed since the state became active (`DeltaTimeSinceStart`). These callbacks are automatically managed and reset if the state is re-entered.
-
-#### `At(float targetTime, Action callback)`
-
-Schedules an `Action` to be invoked once when `DeltaTimeSinceStart` reaches or exceeds `targetTime`. If the state is re-entered, the timer is reset, and the action can be invoked again after the specified `targetTime`.
-
-**Usage:**
-
-```csharp
-StateUnit preparingState = mainGraph.CreateState();
-
-preparingState.OnEnter = () => Debug.Log("Preparing action..."); // Preferred
-
-// After 3 seconds in PreparingState, log a message
-preparingState.At(3.0f, () => {
-    Debug.Log("Preparation complete after 3 seconds!");
-});
-```
-
-#### `AtEvery(float intervalTime, Action callback)`
-
-Schedules an `Action` to be invoked repeatedly at specified `intervalTime` periods while the state is active. The first invocation occurs when `DeltaTimeSinceStart` reaches or exceeds the first `intervalTime`. If the state is re-entered, the interval timing is reset.
-
-**Usage:**
-
-```csharp
-StateUnit activeState = mainGraph.CreateState();
-
-activeState.OnEnter = () => Debug.Log("ActiveState started. Monitoring..."); // Preferred
-
-// Every 5 seconds, print a monitoring message
-activeState.AtEvery(5.0f, () => {
-    Debug.Log($"Monitoring... (Time in state: {activeState.DeltaTimeSinceStart}s)");
-});
-```
-Both `At` and `AtEvery` ensure that the callback is only invoked if the state is currently active. The provided `Action` delegate should be parameterless. If you need to access state-specific data like `DeltaTimeSinceStart` or the `StateUnit` instance itself within the callback, you can do so via a lambda closure:
-
-```csharp
-myState.At(2.5f, () => {
-    Debug.Log($"Action at {myState.DeltaTimeSinceStart} seconds in state {myState.Name}");
-});
-```
-
-### Fixed-Time API and Backward Compatibility
-
-The existing Update-time API remains unchanged:
-
-* `DeltaTimeSinceStart`, `OnUpdate`, `At`, `AtEvery`, `When`, and `After` use the Update clock.
-* Parameterless `UpdateMachine()`, `FixedUpdateMachine()`, `UpdateGraph()`, and `FixedUpdateGraph()` remain supported.
-* The existing `OnFixedUpdate(float updateElapsed)` callback is preserved with its original contract: its argument is still `DeltaTimeSinceStart`, not fixed elapsed time.
-
-New code that needs a real physics clock should use the additive fixed-time API:
-
-```csharp
-attackState.OnFixedTick = (fixedDelta, fixedElapsed) =>
-{
-    body.MovePosition(body.position + velocity * fixedDelta);
-};
-
-attackState.AtFixed(0.10f, OpenHitWindow);
-attackState.AtEveryFixed(0.05f, EmitTrailSample);
-
-(attackState > recoveryState).AfterFixed(0.30f);
-(groundedState > airborneState).WhenFixed(
-    fixedElapsed => !motor.IsGrounded);
-```
-
-The relevant values are:
-
-* `DeltaTime`: scaled delta consumed by the latest Update tick.
-* `DeltaTimeSinceStart`: accumulated scaled Update time; retained for compatibility.
-* `FixedDeltaTime`: scaled delta consumed by the latest FixedUpdate tick.
-* `FixedElapsed`: accumulated scaled FixedUpdate time since state entry.
-
-Update and fixed clocks are independent. Calling `UpdateMachine(...)` does not advance `FixedElapsed`, and calling `FixedUpdateMachine(...)` does not advance `DeltaTimeSinceStart`. All four values reset when the state is entered or re-entered.
-
-For deterministic simulation and tests, explicit-delta overloads are available without replacing the existing APIs:
-
-```csharp
-stateMachine.UpdateMachine(1f / 60f);
-stateMachine.FixedUpdateMachine(1f / 50f);
-```
-
-If a transition enters another state during a tick, the new state does not consume that tick's delta again. Its elapsed clock starts at zero and advances on the next relevant tick.
-
-### Per-State Local Time Scale
-
-`LocalTimeScale` affects only its `StateUnit` and graphs hosted by that state:
-
-```csharp
-attackState.LocalTimeScale = 1.0f; // Normal speed.
-attackState.LocalTimeScale = 0.5f; // Half speed.
-attackState.LocalTimeScale = 0.0f; // Freeze time-driven state execution.
-```
-
-The scale is applied to both Update and FixedUpdate deltas. It therefore affects state elapsed values, timed callbacks, polling transitions, `OnFixedTick`, and hosted graph ticks. Nested states apply their own scale to the already-scaled parent delta.
-
-At zero scale, Update, FixedUpdate, LateUpdate, timed callbacks, polling transitions, and hosted graph ticks do not run. The state remains active: EventBus handlers and event-driven transitions can still process events. Use the existing `SetTurnedOn(false)` power/pause mechanism when event processing must also stop.
-
-Gameplay code that should respect `LocalTimeScale` must use `StateUnit.DeltaTime` or the `fixedDelta` supplied to `OnFixedTick`, rather than reading `Time.deltaTime` or `Time.fixedDeltaTime` directly inside the state callback.
-
-`LocalTimeScale` must be finite and greater than or equal to zero. It is state configuration and is not reset on re-entry; only the elapsed clocks are reset.
-
-## Simplified MonoBehaviour Integration (Recommended)
-
-For the easiest and most robust way to use StateMachineLib with Unity's `MonoBehaviour` lifecycle, use the `CreateManagedStateMachine()` extension method. This method handles all the necessary setup for automatic updates and lifecycle management, tied directly to your `MonoBehaviour`.
-
-**How to Use:**
-Call `CreateManagedStateMachine(Action<StateMachine> setupCallback)` from your `MonoBehaviour` (typically in `Awake()`) with a setup callback. The callback receives the `StateMachine` instance for configuration, and then the `StateMachine` is automatically started.
-
-**Key Benefits:**
-*   **Automatic Lifecycle Management:** 
-    *   The `StateMachine` starts automatically when the `MonoBehaviour` is active.
-    *   It processes `Update`, `FixedUpdate`, and `LateUpdate` calls automatically.
-    *   It pauses if the `MonoBehaviour` is disabled.
-    *   It correctly calls `Exit()` on the `StateMachine` when the `MonoBehaviour` is destroyed, ensuring proper cleanup.
-*   **Simplified Code:** Eliminates the need to manually call `Start()`, `UpdateMachine()`, or `Exit()` from your `MonoBehaviour`.
-*   **Focus on Logic:** Allows you to focus on defining your states and transitions rather than lifecycle boilerplate.
-
-**Usage Example:**
-
-```csharp
-using UnityEngine;
-using Nopnag.StateMachineLib; // Required for StateMachine and the CreateManagedStateMachine() extension method
-
-public class EnemyAI : MonoBehaviour
-{
-    // Optional: Store as a class field if other methods need to access the StateMachine.
-    private StateMachine aiStateMachine;
-
-    void Awake()
-    {
-        // Create a lifecycle-managed StateMachine with a setup callback.
-        // The callback configures the StateMachine, then it's automatically started.
-        aiStateMachine = this.CreateManagedStateMachine(sm =>
-        {
-            StateGraph brain = sm.CreateGraph();
-            
-            StateUnit patrolState = brain.CreateState();
-            patrolState.OnEnter = () => Debug.Log("Enemy: Starting patrol.");
-            // ... add patrol logic and transitions ...
-            
-            StateUnit chaseState = brain.CreateState();
-            chaseState.OnEnter = () => Debug.Log("Enemy: Chasing player!");
-            // ... add chase logic and transitions ...
-
-            brain.InitialUnit = patrolState;
-        });
-        
-        // All lifecycle calls (Start, Update, Exit, etc.) are handled automatically.
-        // The StateMachine is already started and ready to receive events!
-    }
-}
-```
-This extension method provides the most straightforward and recommended way to use `StateMachineLib` within Unity projects.
-
-**Important Notes:**
-*   The setup callback is executed immediately, and then `StateMachine.Start()` is called automatically.
-*   If the `MonoBehaviour` is initially disabled, the `Start()` call is deferred until the component is enabled.
-*   This ensures that event-based transitions work correctly even when events are raised in the same frame as creation (e.g., in `Awake()`).
-
-(Internally, `CreateManagedStateMachine()` utilizes a `StateMachineWrapper` component on the GameObject to manage lifecycle and updates. This underlying mechanism ensures the described automatic behaviors, but you typically don't need to interact with this component directly.)
-
-## Fluent Transition API
-
-A fluent syntax is available for defining transitions directly from `StateUnit` instances. This API uses operator overloading (`>` and `<`) and chained method calls.
-
-This fluent approach is designed with structs to minimize garbage generation during transition setup.
-
-**Initiating a Transition:**
-
-You can start defining a transition using the `>` operator between a source and a target state, or the `<` operator between a target and a source state. Both achieve the same result of setting up a transition from the source to the target.
-
-```csharp
-// These are equivalent ways to start defining a transition from stateA to stateB:
-var transitionAB = (stateA > stateB); 
-var transitionAlsoAB = (stateB < stateA); // (target < source) also configures source -> target
-```
-
-This returns a configurator struct. You then chain one of the following methods to define the transition logic:
-
-### `(fromState > toState).When(predicate)`:
-
-This defines a `BasicTransition` that triggers when the provided predicate returns `true`. The predicate receives the elapsed time in the source state.
-
-```csharp
-StateUnit stateA = myGraph.CreateState();
-StateUnit stateB = myGraph.CreateState();
-
-// Transition from stateA to stateB when health is low after 1 second
-(stateA > stateB).When(elapsedTime => player.Health < 10 && elapsedTime > 1.0f);
-
-// Equivalent using the < operator
-(stateB < stateA).When(elapsedTime => player.Health < 10 && elapsedTime > 1.0f);
-```
-
-### `(fromState > toState).After(duration)`:
-
-This defines a `BasicTransition` that triggers after a specific `duration` (in seconds) has passed since the source state was entered.
-
-```csharp
-StateUnit loadingState = myGraph.CreateState();
-StateUnit readyState = myGraph.CreateState();
-
-// Transition from loadingState to readyState after 2.5 seconds
-(loadingState > readyState).After(2.5f);
-```
-
-### Fixed-time transitions
-
-`WhenFixed` and `AfterFixed` are evaluated only by FixedUpdate and receive/use `FixedElapsed`:
-
-```csharp
-(movingState > idleState).WhenFixed(
-    fixedElapsed => motor.Speed <= 0.01f);
-
-(attackState > recoveryState).AfterFixed(0.25f);
-```
-
-The same `WhenFixed` option is available for dynamic-target and indexed transition configurators. Existing `When` and `After` remain Update-time APIs.
-
-### `(fromState > toState).On<TEvent>(...) (for EventBus Events)`:
-
-This defines a `TransitionByEvent`. It has several overloads:
-
-*   **`On<TEvent>()`**: Triggers when any event of `TEvent` is raised.
-    ```csharp
-    (stateA > stateB).On<PlayerDiedEvent>();
-    ```
-*   **`On<TEvent>(Func<TEvent, bool> predicate)`**: Triggers if `TEvent` is raised AND the predicate returns `true`.
-    ```csharp
-    (stateA > stateB).On<EnemySpottedEvent>(evt => evt.IsHighPriority);
-    ```
-*   **`On<TEvent>(EventQuery<TEvent> query, Func<TEvent, bool> predicate = null)`**: Triggers if `TEvent` matching the `query` is raised. If a `predicate` is also provided, it must also return `true`.
-    ```csharp
-    // Define a marker IParameter type for your specific query.
-    public class ItemTag : IParameter { }
-
-    // Event publishing (example of how the event would be set up elsewhere):
-    // var collectedEvent = new ItemCollectedEvent();
-    // collectedEvent.Set<ItemTag>("KeyCard"); // Set the string value with ItemTag as type key
-    // EventBus.Raise(collectedEvent);
-
-    // Fluent transition setup:
-    (stateA > stateB).On(
-        EventBus<ItemCollectedEvent>.Where<ItemTag>("KeyCard"), // Filter by the string value "KeyCard"
-        evt => evt.Collector.IsPlayer // Optional additional predicate on the event object
-    );
-    ```
-
-### `(fromState > toState).On(ref signal) (for C# Actions)`:
-
-This defines a `TransitionByAction` that triggers when the provided C# `Action` or `Action<T>` delegate (signal) is invoked. The signal must be passed with the `ref` keyword. (The heading shows the parameterless version; `Action<TActionParam>` is also supported).
-
-```csharp
-public Action PlayerJumped;
-public Action<int> PlayerScoredPoints;
-
-// ... in setup ...
-(groundedState > jumpingState).On(ref PlayerJumped);
-(anyState > scoreCelebrationState).On(ref PlayerScoredPoints);
-
-// ... elsewhere ...
-PlayerJumped?.Invoke();
-PlayerScoredPoints?.Invoke(100);
-```
-
-### `(fromState > toState).Immediately()`:
-
-This defines a `DirectTransition` that occurs unconditionally as soon as the source state is entered or updated, causing an immediate transition to the target state. It's useful for states that are purely transitional or serve as entry points that should immediately redirect.
-
-```csharp
-StateUnit entryPointState = myGraph.CreateState();
-StateUnit actualStartState = myGraph.CreateState();
-
-// From entryPointState, immediately go to actualStartState
-(entryPointState > actualStartState).Immediately();
-```
-
-### `(fromState > targetStates).When(indexPredicate)`:
-
-You can define transitions from a single state to one of several possible target states based on an index returned by a condition function. This is useful for decision points where the next state depends on dynamic criteria.
-
-The `When` method, when used with an array of target `StateUnit`s, expects its predicate to return an integer.
-- If the integer is a valid index into the array of target states (0 to N-1), a transition to the state at that index occurs.
-- If the integer is -1 (or any out-of-bounds negative number), no transition occurs.
-
-```csharp
-StateUnit decisionState = myGraph.CreateState();
-StateUnit optionAState = myGraph.CreateState();
-StateUnit optionBState = myGraph.CreateState();
-StateUnit optionCState = myGraph.CreateState();
-
-// From decisionState, transition to one of the new[] { optionAState, ... } based on index
-(decisionState > new[] { optionAState, optionBState, optionCState }).When(elapsedTime => {
-    // Assuming 'player' and 'PlayerChoices' are defined elsewhere
-    // and 'elapsedTime' is the time since 'decisionState' became active.
-    if (player.Choice == PlayerChoices.A) return 0;       // Transition to optionAState
-    if (player.Choice == PlayerChoices.B) return 1;       // Transition to optionBState
-    if (elapsedTime > 10.0f && player.IsIdle) return 2; // Transition to optionCState
-    return -1;                                          // No transition
-});
-```
-
-### `(fromState > StateGraph.DynamicTarget).When(dynamicTargetPredicate)`:
-
-This defines a `ConditionalTransition` where the target state is determined at runtime by the `dynamicTargetPredicate`. 
-
-You initiate this by transitioning from a state to the special `StateGraph.DynamicTarget` marker. The subsequent `.When()` method then takes a predicate of type `Func<float, StateUnit>`.
-
--   **`dynamicTargetPredicate`**: A function that receives the elapsed time in the source state and should return:
-    -   A non-null `StateUnit` to transition to that state.
-    -   `null` to indicate that no transition should occur at this time.
-
-```csharp
-StateUnit patrollingState = myGraph.CreateState();
-StateUnit chasingState = myGraph.CreateState();
-StateUnit investigatingState = myGraph.CreateState();
-
-// From patrollingState, transition to a dynamically chosen state
-(patrollingState > StateGraph.DynamicTarget).When(elapsedTime => {
-    if (CanSeePlayer()) return chasingState;
-    if (HeardNoise()) return investigatingState;
-    return null; // Stay in patrolling state
-});
-```
-
-Future methods (like for conditional transitions to a dynamically chosen single state) will be added to this fluent API.
-
-
-## Practical Usage Example (Character Controller)
-
-This example demonstrates a character controller with Idle, Moving, Jumping, and Stunned states, using various transitions and the recommended `CreateManagedStateMachine()` for easy integration.
-
-```csharp
+using Nopnag.EventBusLib;
 using Nopnag.StateMachineLib;
-using Nopnag.EventBusLib; // For MyEvent, DamageTakenEvent etc.
+
+public sealed class EncounterFlow
+{
+    private readonly StateMachine _machine;
+
+    public EncounterFlow()
+    {
+        _machine = new StateMachine();
+
+        StateGraph graph = _machine.CreateGraph();
+        StateUnit waiting = graph.CreateState();
+        StateUnit fighting = graph.CreateState();
+
+        waiting.OnEnter = EnterWaiting;
+        fighting.OnEnter = EnterFighting;
+        (waiting > fighting).On<EncounterStartedEvent>();
+
+        graph.InitialUnit = waiting;
+    }
+
+    public void Start() => _machine.Start();
+    public void Tick(float deltaTime) => _machine.UpdateMachine(deltaTime);
+    public void FixedTick(float fixedDeltaTime) =>
+        _machine.FixedUpdateMachine(fixedDeltaTime);
+    public void LateTick() => _machine.LateUpdateMachine();
+
+    public void Shutdown()
+    {
+        _machine.Exit();
+        _machine.Dispose();
+    }
+
+    private static void EnterWaiting() { }
+    private static void EnterFighting() { }
+}
+```
+
+Manual ownership rules:
+
+- Construct the complete topology before `Start` whenever possible.
+- Call one Update, FixedUpdate, and LateUpdate driver at most once per corresponding
+  owner tick.
+- `UpdateMachine`, `FixedUpdateMachine`, and `LateUpdateMachine` call `Start`
+  automatically if the machine has not started. Call `Start` explicitly when entry
+  timing matters.
+- `Exit` and `Reset` retain topology and subscriptions and are restartable.
+- `Dispose` is terminal. Clear the consumer's reference after disposal.
+
+### Managed `MonoBehaviour` integration
+
+Use `CreateManagedStateMachine` when one `MonoBehaviour` should own exactly one
+machine and the library should drive Unity lifecycle automatically.
+
+```csharp
+using Nopnag.EventBusLib;
+using Nopnag.StateMachineLib;
 using UnityEngine;
-using System;
 
-// --- Define Events used for Transitions (if not already globally defined) ---
-// public class DamageTakenEvent : BusEvent { } 
-// public class JumpInputEvent : BusEvent { } // Example if using event for jump
-
-public class CharacterController : MonoBehaviour
+public sealed class EnemyBrain : MonoBehaviour
 {
-    private Rigidbody rb;
-    private float jumpForce = 5f;
-    private float _stunDuration = 0.5f; 
+    private StateMachine _machine;
 
-    void Awake()
+    private void Awake()
     {
-        rb = GetComponent<Rigidbody>();
-        if (rb == null) rb = gameObject.AddComponent<Rigidbody>();
-
-        // Create a lifecycle-managed StateMachine with setup callback.
-        this.CreateManagedStateMachine(stateMachine =>
-        {
-            // --- Initialize States and Transitions --- 
-            StateGraph movementGraph = stateMachine.CreateGraph();
-
-            // Define States
-            StateUnit idleState = movementGraph.CreateState();
-            StateUnit movingState = movementGraph.CreateState();
-            StateUnit jumpingState = movementGraph.CreateState();
-            StateUnit stunnedState = movementGraph.CreateState();
-
-            // Assign State Logic
-            idleState.OnEnter = () => { 
-                Debug.Log("Entering Idle State"); 
-            };
-            idleState.OnUpdate = (timeInState) => { /* Maybe play idle animation. */ };
-            
-            movingState.OnEnter = () => Debug.Log("Entering Moving State");
-            movingState.OnUpdate = (timeInState) => 
-            { 
-                Vector3 moveDir = GetMovementInput(); 
-                rb.AddForce(moveDir * 10f * Time.deltaTime);
-            };
-
-            jumpingState.OnEnter = () => 
-            {
-                Debug.Log("Entering Jumping State");
-                rb.AddForce(Vector3.up * jumpForce, ForceMode.Impulse);
-            };
-            
-            stunnedState.OnEnter = () => Debug.Log("Entering Stunned State");
-            stunnedState.OnUpdate = (timeInState) => { /* Maybe play stunned animation. */ };
-
-            // Define Transitions (using Fluent API)
-            (idleState > stunnedState).On<DamageTakenEvent>();
-            (movingState > stunnedState).On<DamageTakenEvent>();
-            (jumpingState > stunnedState).On<DamageTakenEvent>();
-            (stunnedState > idleState).After(_stunDuration);
-            (idleState > movingState).When(elapsedTime => GetMovementInput().magnitude > 0.1f);
-            (movingState > idleState).When(elapsedTime => GetMovementInput().magnitude <= 0.1f);
-            (idleState > jumpingState).When(elapsedTime => Input.GetButtonDown("Jump"));
-            (movingState > jumpingState).When(elapsedTime => Input.GetButtonDown("Jump"));
-            (jumpingState > idleState).After(1.0f); 
-
-            // Set Initial State
-            movementGraph.InitialUnit = idleState;
-        });
-        
-        // Lifecycle (Start, Update, Exit) is handled automatically.
-        // The StateMachine is already running and ready to process events!
+        _machine = this.CreateManagedStateMachine(BuildMachine);
     }
 
-    Vector3 GetMovementInput()
+    private static void BuildMachine(StateMachine machine)
     {
-        float horizontal = Input.GetAxis("Horizontal");
-        float vertical = Input.GetAxis("Vertical");
-        return new Vector3(horizontal, 0, vertical).normalized;
+        StateGraph graph = machine.CreateGraph();
+        StateUnit idle = graph.CreateState();
+        StateUnit chasing = graph.CreateState();
+
+        (idle > chasing).On<PlayerDetectedEvent>();
+        graph.InitialUnit = idle;
     }
 }
 ```
 
-## Installation
+Managed behavior:
 
-**Important:** This package depends on `Nopnag.EventBusLib`. You need to install both packages for StateMachineLib to work correctly.
+- `StateMachineWrapper.GetOrCreate(gameObject)` gets or adds one wrapper component to
+  the GameObject.
+- `GetOrCreate` performs `GetComponent` and may perform `AddComponent`; call managed
+  creation only during an owned initialization boundary, never as an interactive
+  runtime lookup.
+- `CreateManagedStateMachine(setup)` delegates to that wrapper and creates at most one
+  machine per owner `MonoBehaviour`.
+- Setup runs synchronously. If the owner is enabled and active, `Start` also runs
+  synchronously before `CreateManagedStateMachine` returns.
+- A second call for the same owner returns the existing machine; the second setup
+  callback is not invoked.
+- The wrapper drives `UpdateMachine`, `FixedUpdateMachine`, and `LateUpdateMachine`.
+- Disabling the owner or GameObject turns machine power off without exiting the
+  current state. Re-enabling resumes the preserved state and rebases Update clocks.
+- Wrapper destruction exits and disposes registered machines. Individual permanent
+  removal must use `StateMachineWrapper.RemoveStateMachineFor(owner)`.
+- Calling `Exit` directly on a registered machine is not a durable stop while its
+  owner remains enabled; a later wrapper tick starts it again.
+- Do not call `Dispose` directly on a still-registered managed machine. The wrapper
+  would retain and continue ticking the disposed instance.
+- In the Unity Editor, the current wrapper `OnValidate` appends a machine count to the
+  GameObject name and can dirty or truncate intentional bracketed names. See
+  [SM-016](KNOWN_ISSUES.md#sm-016--editor-validation-mutates-the-owning-gameobject-name).
 
-You can install these packages using the Unity Package Manager:
+Important managed timing constraints are recorded under
+[Known issues](KNOWN_ISSUES.md#managed-wrapper-lifecycle-issues). In particular,
+initially disabled owners do not have a universal “started before owner `OnEnable`”
+guarantee.
 
-1.  Open the Package Manager (`Window` > `Package Manager`).
-2.  Click the `+` button in the top-left corner and select `Add package from git URL...`.
-3.  Enter the repository URL for EventBusLib: `https://github.com/cihanozcelik/EventBusLib.git` and click `Add`.
-4.  Repeat step 2.
-5.  Enter the repository URL for StateMachineLib: `https://github.com/cihanozcelik/StateMachineLib.git` and click `Add`.
+## Core model and ownership
 
+The normal hierarchy is:
 
-Alternatively, you can add both directly to your `Packages/manifest.json` file:
-```json
-{
-  "dependencies": {
-    "com.nopnag.eventbuslib": "https://github.com/cihanozcelik/EventBusLib.git", 
-    "com.nopnag.statemachinelib": "https://github.com/cihanozcelik/StateMachineLib.git",
-    // ... other dependencies
-  }
-}
+```text
+StateMachine
+└── StateGraph                    one concurrent flow
+    └── StateUnit                 exactly one current state per graph
+        └── StateGraph            hierarchical flow active with its owner state
+            └── StateUnit
 ```
+
+A `StateMachine` can host multiple top-level graphs. They run concurrently in hosted
+list order. A `StateUnit` can host multiple child graphs; those graphs start, tick,
+and exit through that state's lifecycle methods.
+
+The current child-graph power node does not incorporate the owning state's
+`BaseGraph.CurrentUnit == state` condition. A child graph can therefore report active
+after its parent state exits even though normal ticking stopped. Do not use child
+`IsGraphActive` as a substitute for checking the parent state, and avoid graph-level
+any-state global event transitions in such a child until
+[SM-017](KNOWN_ISSUES.md#sm-017--state-hosted-child-graph-power-does-not-reflect-whether-the-parent-state-is-current)
+is fixed.
+
+Supported ownership invariants:
+
+- Every graph has one authoritative host.
+- The host topology is an acyclic tree.
+- Every transition's source and target states belong to the same `StateGraph`.
+- `InitialUnit` belongs to the graph on which it is assigned.
+- Use `StateMachine` for top-level graphs and `StateUnit` for automatically driven
+  hierarchical graphs.
+- Although `StateGraph` also exposes `IGraphHost`, graphs attached directly to a
+  `StateGraph` are not automatically driven by that graph's normal lifecycle. Treat
+  this as a manual advanced API.
+- Do not manipulate the power tree independently through `AttachChild`, `SetParent`,
+  or `DetachChild` in ordinary state-machine code.
+
+The current runtime does not enforce every invariant. See
+[SM-001](KNOWN_ISSUES.md#sm-001--cross-graph-state-targets-are-not-rejected) and
+[SM-002](KNOWN_ISSUES.md#sm-002--graph-ownership-is-not-exclusive-and-ancestor-cycles-are-possible).
+
+## Basic construction
+
+```csharp
+StateMachine machine = new StateMachine();
+StateGraph movement = machine.CreateGraph();
+
+StateUnit idle = movement.CreateState();
+StateUnit running = movement.CreateState();
+
+idle.OnEnter = OnIdleEntered;
+idle.OnUpdate = OnIdleUpdate;
+idle.OnExit = OnIdleExited;
+
+(idle > running).When(elapsed => ShouldRun());
+(running > idle).When(elapsed => ShouldStop());
+
+movement.InitialUnit = idle;
+machine.Start();
+```
+
+`CreateState` automatically makes the first created state the initial state if
+`InitialUnit` is null. Assigning `InitialUnit` explicitly is recommended for clarity.
+
+`CreateUnit(string)` remains public for compatibility but is obsolete. `CreateState`
+creates a state whose read-only `Name` is null; manage human-readable names externally
+until the naming API is redesigned.
+
+## State callbacks and exact execution order
+
+### Callback properties
+
+| API | Argument | Meaning |
+|---|---|---|
+| `OnEnter` | none | Called synchronously when the state starts. |
+| `OnExit` | none | Called after the state's child graphs exit. |
+| `OnUpdateBeforeTransitionCheck` | accumulated Update elapsed | Called after Update time advances and before timers/transitions. |
+| `OnUpdate` | accumulated Update elapsed | Called only if no local Update transition fired. |
+| `OnFixedUpdate` | accumulated Update elapsed | Legacy callback; its argument is not fixed time. |
+| `OnFixedTick` | scaled fixed delta, accumulated fixed elapsed | Preferred physics-time callback. |
+| `OnLateUpdate` | accumulated Update elapsed | Called before state-hosted child LateUpdate. |
+
+The older public fields `EnterStateFunction`, `ExitStateFunction`,
+`UpdateStateFunction`, `UpdateStateBeforeTransitionCheckFunction`,
+`FixedUpdateStateFunction`, and `LateUpdateStateFunction` are obsolete aliases behind
+the callback properties. Do not use both names for the same callback.
+
+### Entry order
+
+When `StartState` enters a state:
+
+1. The previous current state's child graphs exit.
+2. The previous state's `OnExit` runs.
+3. The graph assigns the new `CurrentUnit` and resets its Update and Fixed clocks.
+4. The new state's `OnEnter` runs.
+5. Graphs hosted by the new `StateUnit` enter in hosted-list order.
+6. One-shot and periodic callback bookkeeping resets.
+7. Due Update callbacks whose target is zero or negative are evaluated.
+8. Local Update polling transitions are evaluated at elapsed zero.
+
+Entry is synchronous. `OnEnter`, zero-time callbacks, and immediate transitions can
+all execute before `Start`, `StartState`, or managed creation returns.
+
+### Update order
+
+For an active, non-frozen graph:
+
+1. Graph-level any-state Update transitions are checked with the current pre-tick
+   elapsed value.
+2. The current state consumes the tick delta once and advances scaled Update time.
+3. `OnUpdateBeforeTransitionCheck` runs.
+4. `At` callbacks run, followed by `AtEvery` catch-up callbacks.
+5. State-local Update transitions are checked in list order.
+6. If no transition fires, `OnUpdate` runs.
+7. State-hosted child graphs receive the scaled delta.
+
+If a transition changes state, the graph may continue evaluating the new state within
+the same graph tick. One explicit delta is consumed by at most one state. The graph's
+per-tick polling loop is capped at ten state changes and logs a warning when exceeded.
+Immediate transition recursion during state entry is a separate known issue and must
+be kept acyclic.
+
+### FixedUpdate order
+
+1. The current state's scaled fixed clock advances once.
+2. Graph-level any-state fixed transitions are checked.
+3. `AtFixed` callbacks run, followed by `AtEveryFixed` catch-up callbacks.
+4. State-local fixed transitions are checked.
+5. Legacy `OnFixedUpdate(DeltaTimeSinceStart)` runs.
+6. `OnFixedTick(FixedDeltaTime, FixedElapsed)` runs.
+7. State-hosted child graphs receive the scaled fixed delta.
+
+One fixed delta is consumed by at most one state even if a transition changes state
+during the fixed tick.
+
+### LateUpdate and exit order
+
+LateUpdate runs `OnLateUpdate` first and then state-hosted child graphs. It is skipped
+for inactive or time-frozen states.
+
+Exit runs state-hosted child graph exits first and the state's `OnExit` afterward.
+
+## Time and timer API
+
+Each state exposes four clocks:
+
+| Property | Contract |
+|---|---|
+| `DeltaTime` | Scaled delta consumed by the latest Update tick. |
+| `DeltaTimeSinceStart` | Accumulated scaled Update time since entry. |
+| `FixedDeltaTime` | Scaled delta consumed by the latest FixedUpdate tick. |
+| `FixedElapsed` | Accumulated scaled fixed time since entry. |
+
+All four reset on every state entry. Update and Fixed clocks are independent.
+
+Parameterless ticking reads Unity time:
+
+```csharp
+machine.UpdateMachine();
+machine.FixedUpdateMachine();
+machine.LateUpdateMachine();
+```
+
+Explicit deltas are available for an authoritative external clock or deterministic
+simulation:
+
+```csharp
+machine.UpdateMachine(updateDelta);
+machine.FixedUpdateMachine(fixedDelta);
+```
+
+Pass only finite values greater than or equal to zero.
+
+### Timed callbacks
+
+```csharp
+state.At(0.20f, OpenWindow);
+state.AtEvery(0.10f, EmitPulse);
+state.AtFixed(0.20f, OpenPhysicsWindow);
+state.AtEveryFixed(0.10f, EmitPhysicsPulse);
+```
+
+- `At` and `AtFixed` run once per state entry when their clock reaches the target.
+- `AtEvery` and `AtEveryFixed` repeat and catch up once per missed interval.
+- Timers reset when the state is re-entered.
+- Register timers during topology construction, not while gameplay is interactive.
+- Use non-null callbacks, finite non-negative one-shot targets, and finite positive
+  periodic intervals.
+- A large elapsed jump can cause an unbounded periodic catch-up loop. Bound external
+  deltas or use a purpose-built bounded callback policy.
+
+### Per-state local time scale
+
+```csharp
+state.LocalTimeScale = 1.0f;
+state.LocalTimeScale = 0.5f;
+state.LocalTimeScale = 0.0f;
+```
+
+`LocalTimeScale` must be finite and non-negative. It scales Update and Fixed clocks,
+timers, polling transitions, Update/Fixed/Late execution, and deltas passed to
+state-hosted child graphs. `OnEnter` and `OnExit` are lifecycle callbacks and are not
+time-scaled. Nested state scales multiply through already-scaled parent deltas.
+
+A zero scale freezes Update, FixedUpdate, LateUpdate, timers, polling transitions, and
+child ticks. The state remains active for EventBus listeners and event-driven
+transitions. Use `SetTurnedOn(false)` when event handling must pause as well.
+
+The scale is configuration and persists across state re-entry; elapsed clocks reset.
+
+## Transition API
+
+All transition delegates and transition objects should be constructed before the
+machine starts. Transition order is definition/list order; the first matching polling
+transition wins.
+
+### Conditional and delayed Update transitions
+
+```csharp
+(idle > moving).When(elapsed => input.HasMovement);
+(attacking > recovery).After(0.35f);
+```
+
+`When` receives `DeltaTimeSinceStart`. `After(duration)` creates a predicate equivalent
+to `elapsed >= duration`. Supply a finite duration greater than or equal to zero.
+
+The reversed syntax `(target < source)` is supported for a single target and means the
+same as `(source > target)`. The `<` variants for arrays, dynamic targets, and any-state
+markers intentionally throw `NotSupportedException`; use their documented `>` forms.
+
+### Fixed transitions
+
+```csharp
+(grounded > airborne).WhenFixed(fixedElapsed => !motor.IsGrounded);
+(attack > recovery).AfterFixed(0.25f);
+```
+
+Fixed predicates receive `FixedElapsed` and are checked only during FixedUpdate.
+Supply a finite non-negative value to `AfterFixed`.
+
+### Event transitions
+
+```csharp
+using Nopnag.EventBusLib;
+
+(waiting > active).On<EncounterStartedEvent>();
+(active > failed).On<EncounterFailedEvent>(evt => evt.Fatal);
+
+EventQuery<ItemCollectedEvent> playerItems =
+    EventBus<ItemCollectedEvent>.Where<CollectorRoute>(playerRoute);
+
+(searching > found).On(playerItems, evt => evt.IsQuestItem);
+```
+
+Event transitions are push-based and synchronous. They do not wait for the next
+machine tick. A transition listens on both the global `EventBus<T>` root/query and the
+source graph's local bus.
+
+The `EventQuery` overload currently applies its route query only on the global bus; its
+local subscription is type-only. Until
+[SM-006](KNOWN_ISSUES.md#sm-006--filtered-state-listeners-and-transitions-are-unfiltered-on-local-buses)
+is fixed, include a predicate over strongly typed event data when local filtered
+delivery is possible.
+
+There is no `.On(ref Action)`, `.On(ref Action<T>)`, or `TransitionByAction` API. Use a
+typed `BusEvent` for discrete transitions.
+
+### Immediate transitions
+
+```csharp
+(entry > ready).Immediately();
+```
+
+A state-local immediate transition is evaluated during entry at elapsed zero. Do not
+create self-targeting or cyclic immediate chains.
+
+An any-state immediate transition is checked by the graph Update polling loop, not by
+`EnterGraph` itself.
+
+### Indexed targets
+
+```csharp
+StateUnit[] choices = { attack, defend, retreat };
+
+(decision > choices).When(elapsed => SelectChoiceIndex());
+(fixedDecision > choices).WhenFixed(fixedElapsed => SelectFixedChoiceIndex());
+```
+
+The predicate returns an array index. Values outside `[0, Length)` produce no
+transition. The target array must be non-null, non-empty, contain no null states, and
+all targets must belong to the source graph.
+
+### Dynamic targets
+
+```csharp
+(decision > StateGraph.DynamicTarget).When(elapsed => SelectTargetOrNull());
+(physicsDecision > StateGraph.DynamicTarget)
+    .WhenFixed(fixedElapsed => SelectFixedTargetOrNull());
+```
+
+Returning null means no transition. A returned state must belong to the source graph.
+
+### Any-state transitions
+
+```csharp
+(StateGraph.Any > dead).On<DiedEvent>();
+(StateGraph.Any > stunned).When(elapsed => status.IsStunned);
+
+graph.FromAny(recovering).After(1.0f);
+graph.FromAnyToDynamic().When(elapsed => SelectGlobalTargetOrNull());
+```
+
+Any-state Update transitions are checked before the active state's Update processing.
+Any-state Fixed transitions are checked after the fixed clock advances but before
+state-local fixed timers/transitions. Any-state targets are required to belong to the
+graph; `FromAny` validates this at setup.
+
+### Low-level transition types
+
+The following public types back the fluent API:
+
+- `IStateTransition`
+- `BasicTransition`
+- `DirectTransition`
+- `ConditionalTransition`
+- `ConditionalTransitionByIndex`
+- static `TransitionByEvent`
+- `TransitionConfigurator`
+- `MultiTargetTransitionConfigurator`
+- `DynamicTargetTransitionConfigurator`
+- `AnyStateMarker` and `DynamicTargetMarker`
+
+Their public `Connect` methods and transition lists remain available for compatibility
+and custom tooling. Gameplay code should prefer the fluent API because it selects the
+correct Update/fixed/any-state collection. Do not mutate `Transitions`,
+`FixedTransitions`, target arrays, or graph transition topology after startup.
+
+| Low-level type | Public surface |
+|---|---|
+| `IStateTransition` | `TargetUnit`, `TargetUnitName`, `SourceUnitName`, and `CheckTransition`. |
+| `BasicTransition` | `Predicate`/target/name inspection plus `Connect` and `ConnectFixed` for state or any-state sources. |
+| `DirectTransition` | Target/name inspection plus `Connect` for state or any-state sources. |
+| `ConditionalTransition` | Dynamic `Predicate`, dynamic target/name inspection, and Update/fixed `Connect`; returns the created transition. |
+| `ConditionalTransitionByIndex` | `Predicate`, `TargetStateInfos`, target/name inspection, and state-local Update/fixed `Connect`. |
+| `TransitionByEvent` | Static `Connect` overloads for state/any-state, optional predicate, and optional query. |
+
+`DynamicTargetTransitionConfigurator` also has a public constructor accepting one
+source `StateUnit`; its any-state constructor is internal. The other configurators are
+created by the fluent operators or graph methods.
+
+## State-scoped event listeners
+
+```csharp
+state.On<DamageTakenEvent>(OnDamageTaken);
+state.On(filteredDamageQuery, OnFilteredDamageTaken);
+```
+
+`StateUnit.On<T>` subscribes during setup but invokes the supplied listener only while
+that state is active. It listens to:
+
+- the global `EventBus<T>` root or supplied global query;
+- the state's base graph local bus;
+- the state host's own local bus.
+
+The older `Listen` overloads are obsolete aliases.
+
+A state entered by an event transition does not receive that same event raise. The
+graph stores the event's `RaiseUniqueId` at entry and rejects another event-driven
+transition or newly activated state handler for that ID.
+
+One event raise can transition each graph at most once, but it may independently
+transition multiple parallel graphs and graphs in different machines.
+
+Configuration order matters because underlying EventBus listeners run in registration
+order. If an active-state handler is registered before the transition listener, it can
+handle the event before the transition. If the transition runs first, the old-state
+handler later observes that it is inactive.
+
+## Local event propagation
+
+Every `IGraphHost` owns a separate `LocalEventBus`. Local events are forwarded
+downward; buses are not shared and events do not bubble upward.
+
+```csharp
+machine.LocalRaise(reusableEncounterEvent);
+activeState.LocalRaise(reusableStateLocalEvent);
+```
+
+Propagation order is:
+
+1. Listeners on the current host's local bus.
+2. Each hosted graph in hosted-list order.
+3. The same host-first traversal recursively within that graph hierarchy.
+
+`StopPropagation` stops remaining listeners on the current query path and prevents
+forwarding into remaining descendants or later sibling graphs.
+
+Each host hop performs a separate top-level `LocalEventBus.Raise` after the previous
+hop returns, so `RaiseUniqueId` is reassigned at each level. Do not treat one ID as a
+hierarchy-wide identifier.
+
+Forwarding follows only that host's `HostedGraphs` list. It does not automatically
+cross from a `StateGraph` into graphs owned by its current `StateUnit`. Therefore:
+
+- `machine.LocalRaise` reaches the machine's top-level graph buses and directly hosted
+  graph links, including handlers/transitions in those graphs.
+- `state.LocalRaise` reaches that state's own local listeners and graphs hosted by that
+  state.
+- A deeper state-owned hierarchy needs an explicit raise through each intended owning
+  state scope; one machine-local raise does not traverse every active state boundary.
+- Event transitions listen to their source graph's local bus, not the source state's
+  own local bus. Raise through the graph/its direct ancestor for those transitions.
+
+See [SM-022](KNOWN_ISSUES.md#sm-022--local-forwarding-does-not-automatically-cross-active-state-host-boundaries).
+
+Call local raise only through an active authoritative owner whose attached graph list
+contains no inactive graph. `GraphHost` does not skip inactive children, while
+`StateGraph.LocalRaise` throws on an inactive graph. A paused machine or one
+individually turned-off attached graph can therefore make local forwarding fail after
+the host bus has already received the event. See
+[SM-018](KNOWN_ISSUES.md#sm-018--local-forwarding-throws-when-an-attached-child-graph-is-inactive).
+
+Use event type names that make local scope visible, for example
+`CharacterLocalAttackRequestedEvent`, and never publish a local-only event type on the
+global bus.
+
+## Graph attachment and detachment
+
+### Create or attach before start
+
+```csharp
+StateGraph graph = machine.CreateGraph();
+
+StateGraph prepared = new StateGraph();
+prepared.InitialUnit = prepared.CreateState();
+machine.AttachGraph(prepared);
+```
+
+`CreateGraph` creates and attaches. `AttachGraph` turns the graph on and establishes
+power ownership but does not call `EnterGraph`.
+
+Construct and attach fresh graphs before the host starts. If a fresh graph is attached
+after host start, it must be entered exactly once by the authoritative lifecycle owner;
+calling `StateMachine.Start` again is a no-op while the machine remains started.
+
+### Detach and reattach
+
+```csharp
+machine.DetachGraph(graph);
+// graph is paused with its current state and subscriptions preserved
+machine.AttachGraph(graph);
+// graph resumes the preserved state; no new OnEnter is issued
+```
+
+Detach:
+
+- removes the graph from the host list;
+- disconnects the power parent and turns the graph off;
+- does not call `ExitGraph`;
+- preserves current state, timers, callbacks, and subscriptions.
+
+`StateMachine.RemoveGraph` is only an alias for detach; it is not disposal.
+
+Do not permanently abandon a detached graph. Global EventBus subscriptions can retain
+it, and there is no public `StateGraph.Dispose`. Do not reattach a graph after its
+former parent has disposed it; use a new graph.
+
+`HostedGraphs` returns an `IReadOnlyList<StateGraph>`, but the current getter allocates
+a new read-only wrapper on each access. Do not poll it during gameplay.
+
+## Power, pause, exit, reset, and disposal
+
+`IPoweredNode` exposes:
+
+- `HasPower`: power reaches the node from an active parent, or it is an enabled power
+  source.
+- `IsTurnedOn`: the node's local switch.
+- `IsActive`: `HasPower && IsTurnedOn`, with `StateUnit` additionally requiring that it
+  is its graph's current state.
+
+`SetTurnedOn(false)` on a `StateMachine` or `StateGraph` is a pause. It does not exit or
+reset the current state. Turning the machine or graph back on rebases Update clocks so
+paused wall-clock duration is not consumed on resume.
+
+`StateUnit.SetTurnedOn` is a low-level power-tree API, not a supported way to pause the
+current state's callbacks: the owning `StateGraph` does not consult the state's power
+switch before invoking its current unit. It can suppress active-state event handling
+and power to child graphs while Update callbacks continue. Pause the owning graph or
+machine instead.
+
+Do not depend on turning a graph off before host start to suppress initial entry;
+current `StartAllGraphs` enters every attached graph. See
+[SM-009](KNOWN_ISSUES.md#sm-009--turned-off-graphs-still-enter-during-host-start).
+
+### Machine lifecycle matrix
+
+| Operation | Topology/subscriptions | State callbacks | Restartable | Notes |
+|---|---|---|---|---|
+| `Start` | retained | enters all hosted graphs once | already started: no-op | Synchronous. |
+| Tick method before start | retained | calls `Start`, then ticks | yes | Lazy auto-start. |
+| `SetTurnedOn(false)` | retained | no exit | yes | Pause; event handling becomes inactive. |
+| `Exit` | retained | exits current states | yes | Powers off after graph exits. |
+| `Reset` | retained | exits current states | yes | Powers off before graph exits. |
+| `Dispose` | attached graph subscriptions/timers cleared | exits attached current states | no | Terminal and idempotent. |
+
+Lifecycle callbacks are not exception-atomic. They must not throw. `Exit` and `Reset`
+also differ in power timing during `OnExit`; do not raise state-changing events from
+exit callbacks.
+
+After `Dispose`, do not inspect power as evidence of liveness and do not call any API
+other than an idempotent repeated `Dispose`. Current post-disposal guards are
+inconsistent; see [SM-011](KNOWN_ISSUES.md#sm-011--disposed-machines-can-still-report-active-power-state).
+
+## Public API reference
+
+### `StateMachine`
+
+| Member | Purpose |
+|---|---|
+| constructor | Creates an unstarted manual machine and local bus host. |
+| `CreateGraph`, `AttachGraph`, `DetachGraph`, `RemoveGraph` | Manage top-level graph ownership; remove means detach. |
+| `HostedGraphs` | Read-only view; currently allocates on access. |
+| `Start` | Enter attached graphs once and power the machine on. |
+| `UpdateMachine` / `(float)` | Lazy-start then drive Update. |
+| `FixedUpdateMachine` / `(float)` | Lazy-start then drive FixedUpdate. |
+| `LateUpdateMachine` | Lazy-start then drive LateUpdate. |
+| `UpdateAllGraphs` / `(float)` | Drive attached graphs without machine auto-start. |
+| `FixedUpdateAllGraphs` / `(float)` | Fixed-drive attached graphs without auto-start. |
+| `LateUpdateAllGraphs` | Late-drive attached graphs without auto-start. |
+| `LocalRaise<T>` | Raise and forward a local event downward. |
+| `SetTurnedOn` | Pause/resume power without exit. |
+| `Exit`, `Reset` | Restartable exit variants with different power timing. |
+| `Dispose` | Terminal cleanup for attached graphs and subscriptions. |
+| `HasPower`, `IsTurnedOn`, `IsActive` | Power-state inspection. |
+
+The `*AllGraphs` methods are advanced driver APIs. Prefer the `*Machine` methods for a
+normal manual machine.
+
+### `StateGraph`
+
+| Member | Purpose |
+|---|---|
+| constructor | Creates an unattached, turned-on graph. |
+| `CreateState` | Creates a state and selects it as initial if none exists. |
+| obsolete `CreateUnit(name)` | Legacy named-state creation. |
+| `InitialUnit` | Mutable initial state; must belong to this graph. |
+| `CurrentUnit` | Current state; throws after parent disposal. |
+| `EnterGraph`, `ExitGraph` | Synchronous manual entry/exit. |
+| `StartState` | Advanced synchronous state change; target must belong to graph. |
+| `UpdateGraph` / `(float)` | Drive graph Update; explicit form validates delta. |
+| `FixedUpdateGraph` / `(float)` | Drive graph FixedUpdate; explicit form validates delta. |
+| `LateUpdateGraph` | Drive graph LateUpdate. |
+| `FromAny`, `FromAnyToDynamic` | Configure any-state transitions. |
+| `GetCurrentStateName`, `IsUnitActive` | Inspection helpers. |
+| `CreateGraph`, `AttachGraph`, `DetachGraph`, `*AllGraphs` | Manual direct graph-host API; not automatically integrated with normal graph lifecycle. |
+| `LocalRaise<T>` | Raise locally; requires active graph. |
+| `SetTurnedOn`, `HasPower`, `IsTurnedOn`, `IsActive`, `IsGraphActive` | Pause and inspect graph power; `IsGraphActive` aliases `IsActive`. |
+| static `Any`, `DynamicTarget` | Fluent transition markers. |
+
+### `StateUnit`
+
+| Member | Purpose |
+|---|---|
+| `BaseGraph`, `Name` | Read-only owning graph and optional legacy name. |
+| callback properties | Entry, exit, Update, FixedUpdate, and LateUpdate behavior. |
+| clock properties | Latest/accumulated scaled Update and Fixed values. |
+| `LocalTimeScale` | Non-negative Update/Fixed/child-graph scale. |
+| `At`, `AtEvery`, `AtFixed`, `AtEveryFixed` | Per-entry timed callbacks. |
+| `On<T>` overloads | Active-state global and local event listening. |
+| obsolete `Listen<T>` overloads | Compatibility aliases for `On`. |
+| `CreateGraph`, `AttachGraph`, `DetachGraph` | Automatic hierarchical graph ownership. |
+| `HostedGraphs`, `*AllGraphs` | Hosted graph view and advanced driving methods. |
+| `LocalRaise<T>` | Raise on the state host bus and forward downward. |
+| `SetTurnedOn`, `SetParent`, `AttachChild`, `DetachChild` | Low-level power API; ordinary code should use graph-host methods. |
+| `Transitions`, `FixedTransitions` | Public mutable transition lists; setup/tooling only. |
+| fluent comparison operators | Build supported transition configurators. |
+
+### `IGraphHost`, `IPoweredNode`, and `PoweredNode`
+
+`IGraphHost` is implemented by `StateMachine`, `StateGraph`, and `StateUnit`. It exposes
+hosted graphs, a local bus through the interface, attach/detach/create, downward local
+raise, and graph-driving methods.
+
+`IPoweredNode` and `PoweredNode` expose the underlying parent/child power tree. They
+are public for composition and testing, but StateMachineLib consumers should not build
+a second ownership topology with them.
+
+| `PoweredNode` member | Purpose |
+|---|---|
+| constructor `(isPowerSource = false)` | Creates a node initially turned off; power sources gain power only when turned on. |
+| `AttachChild`, `DetachChild` | Mutate child power relationships; duplicate same-parent attachment is ignored. |
+| `SetParent` | Replace the parent pointer and refresh descendant power. |
+| `SetTurnedOn` | Change the local switch and refresh descendants. |
+| `RefreshPowerState` | Recompute `HasPower` and recurse through children. |
+| `HasPower`, `IsTurnedOn`, `IsActive` | Inspect power state. |
+
+### `StateMachineWrapper` and `MonoBehaviourExtensions`
+
+- `MonoBehaviourExtensions.CreateManagedStateMachine` is the normal managed entry
+  point.
+- `StateMachineWrapper.GetOrCreate` gets or adds the wrapper component.
+- `StateMachineWrapper.CreateStateMachineFor` performs synchronous setup and managed
+  registration.
+- `StateMachineWrapper.RemoveStateMachineFor` is the permanent managed-removal path.
+
+`StateMachineWrapper` currently lives in the global namespace; the extension method is
+in `Nopnag.StateMachineLib`.
+
+## Allocation and performance contract
+
+StateMachineLib does not promise that arbitrary API use is allocation-free.
+
+The existing automated allocation test covers only a warmed, manually driven,
+explicit-delta Update and FixedUpdate path on a small prepared topology. It does not
+cover managed wrapper ticks, first use, events, setup mutation, attach/detach, shutdown,
+or user callbacks.
+
+Allocate and prepare before interactive runtime:
+
+- machines, graphs, states, transitions, target arrays, and callback delegates;
+- timer registrations and event listener/transition subscriptions;
+- local EventBus event types and route queries;
+- list capacities and the managed wrapper path for the maximum owner count;
+- concrete callback branches, Unity bindings, and consumer resources.
+
+Do not during interactive runtime:
+
+- add states, graphs, transitions, timers, listeners, or query topology;
+- grow target arrays or public transition lists;
+- capture new lambdas or construct new events;
+- poll `HostedGraphs`;
+- assume logging/error paths are allocation-free.
+
+Static inspection cannot establish Unity runtime allocation freedom. Profile the
+warmed real path in Play Mode and on the target device.
+
+## Failure, null, and threading contract
+
+- The library is intended for Unity main-thread ownership. Its mutable lists, graphs,
+  wrapper collections, and callbacks are not thread-safe.
+- Required graphs, states, predicates, queries, events, and callbacks should be
+  non-null. Validation is inconsistent across low-level APIs; fail at the consumer's
+  initialization boundary.
+- Explicit graph deltas must be finite and non-negative.
+- Every graph must have a non-null initial state before entry. A missing initial state
+  currently logs a warning instead of creating a valid current state.
+- `AtEvery`/`AtEveryFixed` require finite positive intervals.
+- Callback and predicate exceptions normally propagate in manual use. Wrapper removal
+  and destruction catch and log several lifecycle exceptions; a log does not prove
+  cleanup completed.
+- Do not depend on warning-and-return behavior for invalid topology. Construct and
+  validate topology before any state mutation or start.
+
+## Attention checklist
+
+Before shipping a StateMachineLib flow, verify all of the following:
+
+- The integration is deliberately manual or deliberately managed; auto-start was not
+  assumed from another code sample.
+- Each managed owner calls creation once and permanent removal goes through the wrapper.
+- Every graph has one host and the topology is acyclic.
+- Every initial/source/target state belongs to the same graph.
+- Fresh graphs are attached before start; detached graphs are not abandoned.
+- Hierarchical graphs are hosted by the owning `StateUnit`.
+- Immediate transition chains terminate.
+- All callbacks, predicates, timers, transitions, and listeners are constructed before
+  interactive runtime.
+- Local filtered listeners/transitions use an explicit event predicate until SM-006 is
+  fixed.
+- Local events are raised only from an active owner and their scope is visible in the
+  event type name.
+- State-hosted child graph activity is authorized by the owning current state, not by
+  the child's `IsGraphActive` property alone.
+- Lifecycle callbacks do not throw or publish reentrant state-changing events.
+- Shutdown uses the correct owner: managed removal for managed machines, and
+  `Exit` plus `Dispose` for terminal manual ownership.
+- The actual warmed gameplay and rare paths have been checked in the Unity Profiler.
+
+## Test coverage map
+
+The repository tests provide evidence for:
+
+- normal polling, immediate, dynamic, indexed, any-state, and event transitions;
+- graph-local one-transition-per-event-raise isolation;
+- parallel graph independence;
+- state-owned subgraph lifecycle;
+- detach/reattach state and subscription preservation;
+- local downward propagation stop across descendants and siblings;
+- power propagation and common pause/resume behavior;
+- independent Update/Fixed clocks, local time scaling, and fixed callbacks;
+- disposal unsubscription on covered paths;
+- one narrow warmed explicit-tick allocation path.
+
+They do not cover every known issue. Consult [KNOWN_ISSUES.md](KNOWN_ISSUES.md) before
+expanding lifecycle, dynamic topology, filtered local events, or strict allocation
+claims.
