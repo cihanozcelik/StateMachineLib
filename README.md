@@ -104,6 +104,10 @@ state1.On<MyGameEvent>(evt => { /* Handle MyGameEvent */ });
     *   Events propagate downwards to hosted graphs.
 *   **Dual Event Listening:** 
     *   `StateUnit.On<TEvent>()` and event-based transitions (`(s1 > s2).On<TEvent>()`) automatically listen to both global `EventBus` events and relevant `LocalEventBus` events from their parent `IGraphHost`(s).
+*   **One Event Transition Per Graph Per Raise:**
+    *   A single event raise can cause at most one event-driven transition in each `StateGraph`.
+    *   This guarantee applies to transitions both with and without predicates. A predicate belonging to the newly entered state is not evaluated for the same raise.
+    *   The guard is graph-local. The event is not stopped and remains available to parallel graphs and other state machines.
 *   **Lifecycle Management (`Dispose`):**
     *   `StateMachine` should be disposed via `Dispose()` when no longer needed (if not using a managed wrapper like `StateMachineMB`) to clean up resources and event subscriptions.
     *   Disposing a `StateMachine` (or a `StateUnit` hosting graphs) will also dispose of all its hosted graphs.
@@ -177,6 +181,35 @@ myState.On(query, evt => { // Preferred
 **Why is this important?**
 - The callback is only invoked if the state is currently active, so you don't need to manually unsubscribe or check state inside the handler.
 - With the `EventQuery` overload for EventBus events, you can listen to only a subset of events (e.g., only those with a certain parameter value), making your state logic more precise and efficient.
+
+## Event Raise Isolation Guarantee
+
+Every EventBus dispatch has a `RaiseUniqueId`. StateMachineLib uses that identifier independently in each `StateGraph` to guarantee that one raise cannot advance the same graph through multiple states.
+
+```csharp
+(stateA > stateB).On<AdvanceEvent>();
+(stateB > stateC).On<AdvanceEvent>();
+```
+
+Raising one `AdvanceEvent` while `stateA` is active performs only `stateA -> stateB`. It never continues with `stateB -> stateC` during that dispatch. A second, separate raise receives a new identifier and may then perform `stateB -> stateC`.
+
+The same guarantee applies when transitions have predicates:
+
+```csharp
+(stateA > stateB).On<AdvanceEvent>();
+(stateB > stateC).On<AdvanceEvent>(evt => EvaluateForStateB(evt));
+```
+
+After the first transition enters `stateB`, `EvaluateForStateB` is not called for that same raise. The guard runs before the predicate, so rejected secondary transitions cannot produce predicate side effects. A `stateB.On<AdvanceEvent>(handler)` state listener is likewise not invoked merely because `stateB` became active during that raise.
+
+This behavior is local to each graph. StateMachineLib does not call `StopPropagation()` to enforce it. The same event may still transition other parallel graphs or graphs in other state machines once each:
+
+```csharp
+(movementIdle > movementReady).On<GameStarted>();
+(combatIdle > combatReady).On<GameStarted>();
+
+EventBus.Raise(gameStarted); // Both graphs may transition.
+```
 
 ## Advanced Features
 

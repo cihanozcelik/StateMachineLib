@@ -7,9 +7,41 @@ namespace Nopnag.StateMachineLib.Transition
   /// Provides static methods to connect state transitions to EventBus events.
   /// These transitions are push-based and occur immediately when a relevant event is raised,
   /// bypassing the typical polling CheckTransition loop.
+  /// Each StateGraph accepts at most one event-driven transition for a RaiseUniqueId.
+  /// The guard runs before predicates and is local to the graph; it does not stop event propagation.
   /// </summary>
   public static class TransitionByEvent // Kept static as per original design
   {
+    static void TryTransition<T>(
+      StateUnit sourceUnit,
+      StateUnit targetUnit,
+      T @event,
+      Func<T, bool> predicate = null) where T : BusEvent
+    {
+      var graph = sourceUnit.BaseGraph;
+      if (graph == null
+          || !graph.IsUnitActive(sourceUnit)
+          || !graph.CanProcessEventRaise(@event.RaiseUniqueId))
+        return;
+
+      if (predicate != null && !predicate(@event)) return;
+      graph.StartState(targetUnit, @event.RaiseUniqueId);
+    }
+
+    static void TryTransition<T>(
+      StateGraph graphContext,
+      StateUnit targetUnit,
+      T @event,
+      Func<T, bool> predicate = null) where T : BusEvent
+    {
+      if (!graphContext.IsGraphActive
+          || !graphContext.CanProcessEventRaise(@event.RaiseUniqueId))
+        return;
+
+      if (predicate != null && !predicate(@event)) return;
+      graphContext.StartState(targetUnit, @event.RaiseUniqueId);
+    }
+
     // --- Transitions from a specific StateUnit ---
     public static void Connect<T>(StateUnit sourceUnit, StateUnit targetUnit) where T : BusEvent
     {
@@ -19,13 +51,7 @@ namespace Nopnag.StateMachineLib.Transition
 
       // Subscribe to Global EventBus
       IIListener globalHandle = EventBus<T>.Listen(
-        @event =>
-        {
-          if (sourceUnit.BaseGraph != null && sourceUnit.BaseGraph.IsUnitActive(sourceUnit)) 
-          {
-            sourceUnit.BaseGraph.StartState(targetUnit, @event.RaiseUniqueId);
-          }
-        }
+        @event => TryTransition(sourceUnit, targetUnit, @event)
       );
       sourceUnit.BaseGraph.RegisterEventTransitionListener(globalHandle);
 
@@ -33,13 +59,7 @@ namespace Nopnag.StateMachineLib.Transition
       if (sourceUnit.BaseGraph.LocalEventBus != null)
       {
         IIListener localHandle = sourceUnit.BaseGraph.LocalEventBus.On<T>().Listen(
-          @event =>
-          {
-            if (sourceUnit.BaseGraph != null && sourceUnit.BaseGraph.IsUnitActive(sourceUnit)) 
-            {
-              sourceUnit.BaseGraph.StartState(targetUnit, @event.RaiseUniqueId);
-            }
-          }
+          @event => TryTransition(sourceUnit, targetUnit, @event)
         );
         sourceUnit.BaseGraph.RegisterEventTransitionListener(localHandle);
       }
@@ -55,13 +75,7 @@ namespace Nopnag.StateMachineLib.Transition
 
       // Subscribe to Global EventBus
       IIListener globalHandle = EventBus<T>.Listen(
-        @event =>
-        {
-          if (sourceUnit.BaseGraph != null && sourceUnit.BaseGraph.IsUnitActive(sourceUnit) && predicate(@event)) 
-          {
-            sourceUnit.BaseGraph.StartState(targetUnit, @event.RaiseUniqueId);
-          }
-        }
+        @event => TryTransition(sourceUnit, targetUnit, @event, predicate)
       );
       sourceUnit.BaseGraph.RegisterEventTransitionListener(globalHandle);
 
@@ -69,13 +83,7 @@ namespace Nopnag.StateMachineLib.Transition
       if (sourceUnit.BaseGraph.LocalEventBus != null)
       {
         IIListener localHandle = sourceUnit.BaseGraph.LocalEventBus.On<T>().Listen(
-          @event =>
-          {
-            if (sourceUnit.BaseGraph != null && sourceUnit.BaseGraph.IsUnitActive(sourceUnit) && predicate(@event)) 
-            {
-              sourceUnit.BaseGraph.StartState(targetUnit, @event.RaiseUniqueId);
-            }
-          }
+          @event => TryTransition(sourceUnit, targetUnit, @event, predicate)
         );
         sourceUnit.BaseGraph.RegisterEventTransitionListener(localHandle);
       }
@@ -91,13 +99,7 @@ namespace Nopnag.StateMachineLib.Transition
 
       // Subscribe to Global EventBus with query
       IIListener globalHandle = query.Listen(
-        @event =>
-        {
-          if (sourceUnit.BaseGraph != null && sourceUnit.BaseGraph.IsUnitActive(sourceUnit)) 
-          {
-            sourceUnit.BaseGraph.StartState(targetUnit, @event.RaiseUniqueId);
-          }
-        }
+        @event => TryTransition(sourceUnit, targetUnit, @event)
       );
       sourceUnit.BaseGraph.RegisterEventTransitionListener(globalHandle);
 
@@ -105,13 +107,7 @@ namespace Nopnag.StateMachineLib.Transition
       if (sourceUnit.BaseGraph.LocalEventBus != null)
       {
         IIListener localHandle = sourceUnit.BaseGraph.LocalEventBus.On<T>().Listen(
-          @event =>
-          {
-            if (sourceUnit.BaseGraph != null && sourceUnit.BaseGraph.IsUnitActive(sourceUnit)) 
-            {
-              sourceUnit.BaseGraph.StartState(targetUnit, @event.RaiseUniqueId);
-            }
-          }
+          @event => TryTransition(sourceUnit, targetUnit, @event)
         );
         sourceUnit.BaseGraph.RegisterEventTransitionListener(localHandle);
       }
@@ -128,13 +124,7 @@ namespace Nopnag.StateMachineLib.Transition
 
       // Subscribe to Global EventBus with query and predicate
       IIListener globalHandle = query.Listen(
-        @event =>
-        {
-          if (sourceUnit.BaseGraph != null && sourceUnit.BaseGraph.IsUnitActive(sourceUnit) && predicate(@event)) 
-          {
-            sourceUnit.BaseGraph.StartState(targetUnit, @event.RaiseUniqueId);
-          }
-        }
+        @event => TryTransition(sourceUnit, targetUnit, @event, predicate)
       );
       sourceUnit.BaseGraph.RegisterEventTransitionListener(globalHandle);
 
@@ -142,13 +132,7 @@ namespace Nopnag.StateMachineLib.Transition
       if (sourceUnit.BaseGraph.LocalEventBus != null)
       {
         IIListener localHandle = sourceUnit.BaseGraph.LocalEventBus.On<T>().Listen(
-          @event =>
-          {
-            if (sourceUnit.BaseGraph != null && sourceUnit.BaseGraph.IsUnitActive(sourceUnit) && predicate(@event)) 
-            {
-              sourceUnit.BaseGraph.StartState(targetUnit, @event.RaiseUniqueId);
-            }
-          }
+          @event => TryTransition(sourceUnit, targetUnit, @event, predicate)
         );
         sourceUnit.BaseGraph.RegisterEventTransitionListener(localHandle);
       }
@@ -162,13 +146,7 @@ namespace Nopnag.StateMachineLib.Transition
 
       // Subscribe to Global EventBus
       IIListener globalHandle = EventBus<T>.Listen(
-        @event =>
-        {
-          if (graphContext.IsGraphActive) 
-          {
-            graphContext.StartState(targetUnit, @event.RaiseUniqueId);
-          }
-        }
+        @event => TryTransition(graphContext, targetUnit, @event)
       );
       graphContext.RegisterEventTransitionListener(globalHandle);
 
@@ -176,13 +154,7 @@ namespace Nopnag.StateMachineLib.Transition
       if (graphContext.LocalEventBus != null)
       {
         IIListener localHandle = graphContext.LocalEventBus.On<T>().Listen(
-          @event =>
-          {
-            if (graphContext.IsGraphActive) 
-            {
-              graphContext.StartState(targetUnit, @event.RaiseUniqueId);
-            }
-          }
+          @event => TryTransition(graphContext, targetUnit, @event)
         );
         graphContext.RegisterEventTransitionListener(localHandle);
       }
@@ -197,13 +169,7 @@ namespace Nopnag.StateMachineLib.Transition
 
       // Subscribe to Global EventBus
       IIListener globalHandle = EventBus<T>.Listen(
-        @event =>
-        {
-          if (graphContext.IsGraphActive && predicate(@event)) 
-          {
-            graphContext.StartState(targetUnit, @event.RaiseUniqueId);
-          }
-        }
+        @event => TryTransition(graphContext, targetUnit, @event, predicate)
       );
       graphContext.RegisterEventTransitionListener(globalHandle);
 
@@ -211,13 +177,7 @@ namespace Nopnag.StateMachineLib.Transition
       if (graphContext.LocalEventBus != null)
       {
         IIListener localHandle = graphContext.LocalEventBus.On<T>().Listen(
-          @event =>
-          {
-            if (graphContext.IsGraphActive && predicate(@event)) 
-            {
-              graphContext.StartState(targetUnit, @event.RaiseUniqueId);
-            }
-          }
+          @event => TryTransition(graphContext, targetUnit, @event, predicate)
         );
         graphContext.RegisterEventTransitionListener(localHandle);
       }
@@ -232,13 +192,7 @@ namespace Nopnag.StateMachineLib.Transition
 
       // Subscribe to Global EventBus with query
       IIListener globalHandle = query.Listen(
-        @event =>
-        {
-          if (graphContext.IsGraphActive) 
-          {
-            graphContext.StartState(targetUnit, @event.RaiseUniqueId);
-          }
-        }
+        @event => TryTransition(graphContext, targetUnit, @event)
       );
       graphContext.RegisterEventTransitionListener(globalHandle);
 
@@ -246,13 +200,7 @@ namespace Nopnag.StateMachineLib.Transition
       if (graphContext.LocalEventBus != null)
       {
         IIListener localHandle = graphContext.LocalEventBus.On<T>().Listen(
-          @event =>
-          {
-            if (graphContext.IsGraphActive) 
-            {
-              graphContext.StartState(targetUnit, @event.RaiseUniqueId);
-            }
-          }
+          @event => TryTransition(graphContext, targetUnit, @event)
         );
         graphContext.RegisterEventTransitionListener(localHandle);
       }
@@ -268,13 +216,7 @@ namespace Nopnag.StateMachineLib.Transition
 
       // Subscribe to Global EventBus with query and predicate
       IIListener globalHandle = query.Listen(
-        @event =>
-        {
-          if (graphContext.IsGraphActive && predicate(@event)) 
-          {
-            graphContext.StartState(targetUnit, @event.RaiseUniqueId);
-          }
-        }
+        @event => TryTransition(graphContext, targetUnit, @event, predicate)
       );
       graphContext.RegisterEventTransitionListener(globalHandle);
 
@@ -282,13 +224,7 @@ namespace Nopnag.StateMachineLib.Transition
       if (graphContext.LocalEventBus != null)
       {
         IIListener localHandle = graphContext.LocalEventBus.On<T>().Listen(
-          @event =>
-          {
-            if (graphContext.IsGraphActive && predicate(@event)) 
-            {
-              graphContext.StartState(targetUnit, @event.RaiseUniqueId);
-            }
-          }
+          @event => TryTransition(graphContext, targetUnit, @event, predicate)
         );
         graphContext.RegisterEventTransitionListener(localHandle);
       }

@@ -232,6 +232,17 @@ namespace Nopnag.StateMachineLib
       CurrentUnit?.LateUpdate();
     }
 
+    /// <summary>
+    /// Returns whether the current state may process the supplied event raise.
+    /// A state entered by an event cannot process that same raise again.
+    /// The guard is graph-local, so other graphs and state machines remain free
+    /// to process the same event.
+    /// </summary>
+    internal bool CanProcessEventRaise(long raiseUniqueId)
+    {
+      return raiseUniqueId == 0 || raiseUniqueId != _currentStateEntryRaiseId;
+    }
+
     public void StartState(StateUnit unit, long raiseUniqueId = 0)
     {
       if (_isDisposedByParent) throw new ObjectDisposedException(nameof(StateGraph));
@@ -243,7 +254,7 @@ namespace Nopnag.StateMachineLib
 
       // Prevent event transition chaining: if this transition is triggered by the same event
       // that caused entry into the current state, ignore it
-      if (raiseUniqueId != 0 && raiseUniqueId == _currentStateEntryRaiseId)
+      if (!CanProcessEventRaise(raiseUniqueId))
       {
         return; // Same event cannot both enter and exit a state
       }

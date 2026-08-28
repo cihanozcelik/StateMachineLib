@@ -217,6 +217,7 @@ namespace Nopnag.StateMachineLib
 
     /// <summary>
     /// Subscribes to events of type T from both Global and Local EventBus, but only invokes the listener while this state is active.
+    /// A state entered by an event transition does not receive that same event raise.
     /// </summary>
     /// <typeparam name="T">The event type to listen for.</typeparam>
     /// <param name="listener">The callback to invoke when the event is raised and this state is active.</param>
@@ -227,7 +228,7 @@ namespace Nopnag.StateMachineLib
       var globalHandle = EventBus<T>.Listen(
         @event =>
         {
-          if (IsActive) listener.Invoke(@event);
+          if (CanProcessEvent(@event)) listener.Invoke(@event);
         }
       );
       _stateUnitEventBusListeners.Add(globalHandle);
@@ -238,7 +239,7 @@ namespace Nopnag.StateMachineLib
         var parentHandle = BaseGraph.LocalEventBus.On<T>().Listen(
           @event =>
           {
-            if (IsActive) listener.Invoke(@event);
+            if (CanProcessEvent(@event)) listener.Invoke(@event);
           }
         );
         _stateUnitEventBusListeners.Add(parentHandle);
@@ -248,7 +249,7 @@ namespace Nopnag.StateMachineLib
       var localHandle = LocalEventBus.On<T>().Listen(
         @event =>
         {
-          if (IsActive) listener.Invoke(@event);
+          if (CanProcessEvent(@event)) listener.Invoke(@event);
         }
       );
       _stateUnitEventBusListeners.Add(localHandle);
@@ -256,6 +257,7 @@ namespace Nopnag.StateMachineLib
 
     /// <summary>
     /// Subscribes to filtered events (via EventQuery) of type T from both Global and Local EventBus, but only invokes the listener while this state is active.
+    /// A state entered by an event transition does not receive that same event raise.
     /// </summary>
     /// <typeparam name="T">The event type to listen for.</typeparam>
     /// <param name="query">The EventQuery to filter which events to listen for.</param>
@@ -267,7 +269,7 @@ namespace Nopnag.StateMachineLib
       var globalHandle = query.Listen(
         @event =>
         {
-          if (IsActive) listener.Invoke(@event);
+          if (CanProcessEvent(@event)) listener.Invoke(@event);
         }
       );
       _stateUnitEventBusListeners.Add(globalHandle);
@@ -278,7 +280,7 @@ namespace Nopnag.StateMachineLib
         var parentHandle = BaseGraph.LocalEventBus.On<T>().Listen(
           @event =>
           {
-            if (IsActive) listener.Invoke(@event);
+            if (CanProcessEvent(@event)) listener.Invoke(@event);
           }
         );
         _stateUnitEventBusListeners.Add(parentHandle);
@@ -288,14 +290,22 @@ namespace Nopnag.StateMachineLib
       var localHandle = LocalEventBus.On<T>().Listen(
         @event =>
         {
-          if (IsActive) listener.Invoke(@event);
+          if (CanProcessEvent(@event)) listener.Invoke(@event);
         }
       );
       _stateUnitEventBusListeners.Add(localHandle);
     }
 
+    bool CanProcessEvent(BusEvent @event)
+    {
+      return IsActive
+             && BaseGraph != null
+             && BaseGraph.CanProcessEventRaise(@event.RaiseUniqueId);
+    }
+
     /// <summary>
     /// Subscribes to events of type T from both Global and Local EventBus, but only invokes the listener while this state is active.
+    /// A state entered by an event transition does not receive that same event raise.
     /// </summary>
     /// <typeparam name="T">The event type to listen for.</typeparam>
     /// <param name="listener">The callback to invoke when the event is raised and this state is active.</param>
@@ -306,6 +316,7 @@ namespace Nopnag.StateMachineLib
 
     /// <summary>
     /// Subscribes to filtered events (via EventQuery) of type T from both Global and Local EventBus, but only invokes the listener while this state is active.
+    /// A state entered by an event transition does not receive that same event raise.
     /// </summary>
     /// <typeparam name="T">The event type to listen for.</typeparam>
     /// <param name="query">The EventQuery to filter which events to listen for.</param>
