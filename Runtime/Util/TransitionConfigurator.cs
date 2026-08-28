@@ -74,6 +74,42 @@ namespace Nopnag.StateMachineLib.Util
         }
 
         /// <summary>
+        /// Creates a transition evaluated only during FixedUpdate. The predicate receives
+        /// the source state's FixedElapsed value.
+        /// </summary>
+        public void WhenFixed(Func<float, bool> predicate)
+        {
+            if (ToState == null) { UnityEngine.Debug.LogError(ErrorMessageTargetNull); return; }
+            if (FromState != null)
+            {
+                BasicTransition.ConnectFixed(FromState, ToState, predicate);
+            }
+            else
+            {
+                BasicTransition.ConnectFixed(GraphContext, ToState, predicate);
+            }
+        }
+
+        /// <summary>
+        /// Creates a transition after the specified duration on the source state's
+        /// FixedElapsed clock.
+        /// </summary>
+        public void AfterFixed(float duration)
+        {
+            if (ToState == null) { UnityEngine.Debug.LogError(ErrorMessageTargetNull); return; }
+            Func<float, bool> condition = fixedElapsed =>
+                fixedElapsed >= duration || UnityEngine.Mathf.Approximately(fixedElapsed, duration);
+            if (FromState != null)
+            {
+                BasicTransition.ConnectFixed(FromState, ToState, condition);
+            }
+            else
+            {
+                BasicTransition.ConnectFixed(GraphContext, ToState, condition);
+            }
+        }
+
+        /// <summary>
         /// Creates a TransitionByEvent that occurs when an event of type TEvent is raised.
         /// </summary>
         /// <typeparam name="TEvent">The type of the event to listen for.</typeparam>
@@ -154,4 +190,4 @@ namespace Nopnag.StateMachineLib.Util
 
         private const string ErrorMessageTargetNull = "TransitionConfigurator: Target state must not be null.";
     }
-} 
+}

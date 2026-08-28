@@ -52,5 +52,30 @@ namespace Nopnag.StateMachineLib.Util
 
             ConditionalTransitionByIndex.Connect(this.FromState, this.ToStates, indexPredicate);
         }
+
+        /// <summary>
+        /// Creates an indexed transition evaluated only during FixedUpdate. The predicate
+        /// receives the source state's FixedElapsed value.
+        /// </summary>
+        public void WhenFixed(Func<float, int> indexPredicate)
+        {
+            if (FromState == null)
+            {
+                Debug.LogError("MultiTargetTransitionConfigurator: Source state must not be null.");
+                return;
+            }
+            if (ToStates == null || !ToStates.Any())
+            {
+                Debug.LogError("MultiTargetTransitionConfigurator: Target states array must not be null or empty.");
+                return;
+            }
+            if (ToStates.Any(s => s == null))
+            {
+                Debug.LogError("MultiTargetTransitionConfigurator: One or more target states in the array is null.");
+                return;
+            }
+
+            ConditionalTransitionByIndex.ConnectFixed(FromState, ToStates, indexPredicate);
+        }
     }
-} 
+}

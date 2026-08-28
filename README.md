@@ -104,6 +104,12 @@ state1.On<MyGameEvent>(evt => { /* Handle MyGameEvent */ });
     *   Events propagate downwards to hosted graphs.
 *   **Dual Event Listening:** 
     *   `StateUnit.On<TEvent>()` and event-based transitions (`(s1 > s2).On<TEvent>()`) automatically listen to both global `EventBus` events and relevant `LocalEventBus` events from their parent `IGraphHost`(s).
+    *   This is intentional: event scope is expressed by where the producer raises the event and by the event type's name, rather than by separate `OnLocal` and `OnGlobal` transition APIs.
+    *   An event type designed exclusively for local delivery must make that scope explicit in its name, for example `LocalAttackRequestedEvent` or `CharacterLocalAttackRequestedEvent`, and producers must raise it through the owning hierarchy's `LocalRaise(...)` API rather than the global `EventBus`.
+*   **One Event Transition Per Graph Per Raise:**
+    *   A single event raise can cause at most one event-driven transition in each `StateGraph`.
+    *   This guarantee applies to transitions both with and without predicates. A predicate belonging to the newly entered state is not evaluated for the same raise.
+    *   The guard is graph-local. The event is not stopped and remains available to parallel graphs and other state machines.
 *   **Lifecycle Management (`Dispose`):**
     *   `StateMachine` should be disposed via `Dispose()` when no longer needed (if not using a managed wrapper like `StateMachineMB`) to clean up resources and event subscriptions.
     *   Disposing a `StateMachine` (or a `StateUnit` hosting graphs) will also dispose of all its hosted graphs.
@@ -112,6 +118,23 @@ state1.On<MyGameEvent>(evt => { /* Handle MyGameEvent */ });
 *   **Rich Transition System:** Fluent API for time-based, event-based, conditional, and immediate transitions.
 *   **Parallel Graphs:** `StateMachine` can manage multiple top-level `StateGraph`s.
 *   **Time-Based Callbacks:** `StateUnit.At()` and `StateUnit.AtEvery()` for timed actions within a state.
+
+### Local-Only Event Naming Pattern
+
+State listeners and event transitions deliberately use the same event type for global and local delivery. When an event belongs only to one character, weapon, or state-machine hierarchy, encode that restriction in the event type name and publish it locally:
+
+```csharp
+public sealed class CharacterLocalAttackRequestedEvent : BusEvent
+{
+}
+
+(ready > attacking).On<CharacterLocalAttackRequestedEvent>();
+
+// Correct for this local-only event type:
+characterStateMachine.LocalRaise(new CharacterLocalAttackRequestedEvent());
+```
+
+Do not globally raise an event type whose name declares it local-only. This naming and publishing convention keeps the fluent transition API uniform while making event scope visible at every usage site.
 
 ## Main Concepts
 
@@ -177,6 +200,35 @@ myState.On(query, evt => { // Preferred
 **Why is this important?**
 - The callback is only invoked if the state is currently active, so you don't need to manually unsubscribe or check state inside the handler.
 - With the `EventQuery` overload for EventBus events, you can listen to only a subset of events (e.g., only those with a certain parameter value), making your state logic more precise and efficient.
+
+## Event Raise Isolation Guarantee
+
+Every EventBus dispatch has a `RaiseUniqueId`. StateMachineLib uses that identifier independently in each `StateGraph` to guarantee that one raise cannot advance the same graph through multiple states.
+
+```csharp
+(stateA > stateB).On<AdvanceEvent>();
+(stateB > stateC).On<AdvanceEvent>();
+```
+
+Raising one `AdvanceEvent` while `stateA` is active performs only `stateA -> stateB`. It never continues with `stateB -> stateC` during that dispatch. A second, separate raise receives a new identifier and may then perform `stateB -> stateC`.
+
+The same guarantee applies when transitions have predicates:
+
+```csharp
+(stateA > stateB).On<AdvanceEvent>();
+(stateB > stateC).On<AdvanceEvent>(evt => EvaluateForStateB(evt));
+```
+
+After the first transition enters `stateB`, `EvaluateForStateB` is not called for that same raise. The guard runs before the predicate, so rejected secondary transitions cannot produce predicate side effects. A `stateB.On<AdvanceEvent>(handler)` state listener is likewise not invoked merely because `stateB` became active during that raise.
+
+This behavior is local to each graph. StateMachineLib does not call `StopPropagation()` to enforce it. The same event may still transition other parallel graphs or graphs in other state machines once each:
+
+```csharp
+(movementIdle > movementReady).On<GameStarted>();
+(combatIdle > combatReady).On<GameStarted>();
+
+EventBus.Raise(gameStarted); // Both graphs may transition.
+```
 
 ## Advanced Features
 
@@ -290,6 +342,66 @@ myState.At(2.5f, () => {
 });
 ```
 
+### Fixed-Time API and Backward Compatibility
+
+The existing Update-time API remains unchanged:
+
+* `DeltaTimeSinceStart`, `OnUpdate`, `At`, `AtEvery`, `When`, and `After` use the Update clock.
+* Parameterless `UpdateMachine()`, `FixedUpdateMachine()`, `UpdateGraph()`, and `FixedUpdateGraph()` remain supported.
+* The existing `OnFixedUpdate(float updateElapsed)` callback is preserved with its original contract: its argument is still `DeltaTimeSinceStart`, not fixed elapsed time.
+
+New code that needs a real physics clock should use the additive fixed-time API:
+
+```csharp
+attackState.OnFixedTick = (fixedDelta, fixedElapsed) =>
+{
+    body.MovePosition(body.position + velocity * fixedDelta);
+};
+
+attackState.AtFixed(0.10f, OpenHitWindow);
+attackState.AtEveryFixed(0.05f, EmitTrailSample);
+
+(attackState > recoveryState).AfterFixed(0.30f);
+(groundedState > airborneState).WhenFixed(
+    fixedElapsed => !motor.IsGrounded);
+```
+
+The relevant values are:
+
+* `DeltaTime`: scaled delta consumed by the latest Update tick.
+* `DeltaTimeSinceStart`: accumulated scaled Update time; retained for compatibility.
+* `FixedDeltaTime`: scaled delta consumed by the latest FixedUpdate tick.
+* `FixedElapsed`: accumulated scaled FixedUpdate time since state entry.
+
+Update and fixed clocks are independent. Calling `UpdateMachine(...)` does not advance `FixedElapsed`, and calling `FixedUpdateMachine(...)` does not advance `DeltaTimeSinceStart`. All four values reset when the state is entered or re-entered.
+
+For deterministic simulation and tests, explicit-delta overloads are available without replacing the existing APIs:
+
+```csharp
+stateMachine.UpdateMachine(1f / 60f);
+stateMachine.FixedUpdateMachine(1f / 50f);
+```
+
+If a transition enters another state during a tick, the new state does not consume that tick's delta again. Its elapsed clock starts at zero and advances on the next relevant tick.
+
+### Per-State Local Time Scale
+
+`LocalTimeScale` affects only its `StateUnit` and graphs hosted by that state:
+
+```csharp
+attackState.LocalTimeScale = 1.0f; // Normal speed.
+attackState.LocalTimeScale = 0.5f; // Half speed.
+attackState.LocalTimeScale = 0.0f; // Freeze time-driven state execution.
+```
+
+The scale is applied to both Update and FixedUpdate deltas. It therefore affects state elapsed values, timed callbacks, polling transitions, `OnFixedTick`, and hosted graph ticks. Nested states apply their own scale to the already-scaled parent delta.
+
+At zero scale, Update, FixedUpdate, LateUpdate, timed callbacks, polling transitions, and hosted graph ticks do not run. The state remains active: EventBus handlers and event-driven transitions can still process events. Use the existing `SetTurnedOn(false)` power/pause mechanism when event processing must also stop.
+
+Gameplay code that should respect `LocalTimeScale` must use `StateUnit.DeltaTime` or the `fixedDelta` supplied to `OnFixedTick`, rather than reading `Time.deltaTime` or `Time.fixedDeltaTime` directly inside the state callback.
+
+`LocalTimeScale` must be finite and greater than or equal to zero. It is state configuration and is not reset on re-entry; only the elapsed clocks are reset.
+
 ## Simplified MonoBehaviour Integration (Recommended)
 
 For the easiest and most robust way to use StateMachineLib with Unity's `MonoBehaviour` lifecycle, use the `CreateManagedStateMachine()` extension method. This method handles all the necessary setup for automatic updates and lifecycle management, tied directly to your `MonoBehaviour`.
@@ -394,6 +506,19 @@ StateUnit readyState = myGraph.CreateState();
 // Transition from loadingState to readyState after 2.5 seconds
 (loadingState > readyState).After(2.5f);
 ```
+
+### Fixed-time transitions
+
+`WhenFixed` and `AfterFixed` are evaluated only by FixedUpdate and receive/use `FixedElapsed`:
+
+```csharp
+(movingState > idleState).WhenFixed(
+    fixedElapsed => motor.Speed <= 0.01f);
+
+(attackState > recoveryState).AfterFixed(0.25f);
+```
+
+The same `WhenFixed` option is available for dynamic-target and indexed transition configurators. Existing `When` and `After` remain Update-time APIs.
 
 ### `(fromState > toState).On<TEvent>(...) (for EventBus Events)`:
 

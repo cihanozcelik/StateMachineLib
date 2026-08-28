@@ -52,7 +52,8 @@ namespace Nopnag.StateMachineLib
     public Action<float> LateUpdateStateFunction;
 
     public readonly string                 Name;
-    public readonly List<IStateTransition> Transitions = new();
+    public readonly List<IStateTransition> Transitions      = new();
+    public readonly List<IStateTransition> FixedTransitions = new();
 
     [Obsolete("Use OnUpdateBeforeTransitionCheck instead.", false)]
     public Action<float> UpdateStateBeforeTransitionCheckFunction;
@@ -64,13 +65,16 @@ namespace Nopnag.StateMachineLib
     readonly GraphHost _graphHost;
 
     // New multi-graph support via composition
-    readonly List<PeriodicCallback> _periodicCallbacks = new();
+    readonly List<PeriodicCallback> _periodicCallbacks      = new();
+    readonly List<PeriodicCallback> _fixedPeriodicCallbacks = new();
 
     // IPoweredNode implementation  
     readonly PoweredNode _poweredNode;
     float                _previousTime;
+    float                _localTimeScale = 1f;
 
     readonly List<ScheduledCallback> _scheduledCallbacks         = new();
+    readonly List<ScheduledCallback> _fixedScheduledCallbacks    = new();
     List<IIListener>                 _stateUnitEventBusListeners = new();
 
     internal StateUnit(string name, StateGraph graph)
@@ -90,8 +94,51 @@ namespace Nopnag.StateMachineLib
       _poweredNode.SetTurnedOn(true); // StateUnits are always turned on
     }
 
-    public   float         DeltaTimeSinceStart { get; private set; }
+    /// <summary>
+    /// Accumulated scaled Update time since this state was entered. This is the
+    /// existing Update-time clock retained for backwards compatibility.
+    /// </summary>
+    public float DeltaTimeSinceStart { get; private set; }
+
+    /// <summary>
+    /// Scaled delta consumed by this state during its latest Update tick.
+    /// </summary>
+    public float DeltaTime { get; private set; }
+
+    /// <summary>
+    /// Scaled fixed delta consumed by this state during its latest FixedUpdate tick.
+    /// </summary>
+    public float FixedDeltaTime { get; private set; }
+
+    /// <summary>
+    /// Accumulated scaled FixedUpdate time since this state was entered.
+    /// </summary>
+    public float FixedElapsed { get; private set; }
+
     internal LocalEventBus LocalEventBus       => _graphHost.LocalEventBus;
+
+    /// <summary>
+    /// Scales this state's Update and FixedUpdate clocks and all hosted graphs.
+    /// A value of 1 is normal speed, 0.5 is half speed, and 0 freezes time-driven
+    /// callbacks, polling transitions, timers, and hosted graph ticks while leaving
+    /// the state active for event handling.
+    /// </summary>
+    public float LocalTimeScale
+    {
+      get => _localTimeScale;
+      set
+      {
+        if (float.IsNaN(value) || float.IsInfinity(value) || value < 0f)
+          throw new ArgumentOutOfRangeException(nameof(value), value,
+            "StateUnit.LocalTimeScale must be finite and greater than or equal to zero.");
+
+        var wasFrozen = _localTimeScale == 0f;
+        _localTimeScale = value;
+        if (wasFrozen && value > 0f) RebaseUpdateClock();
+      }
+    }
+
+    internal bool IsTimeFrozen => _localTimeScale == 0f;
     public Action OnEnter
     {
       get => EnterStateFunction;
@@ -102,11 +149,20 @@ namespace Nopnag.StateMachineLib
       get => ExitStateFunction;
       set => ExitStateFunction = value;
     }
+    /// <summary>
+    /// Legacy FixedUpdate callback. Its argument remains DeltaTimeSinceStart, the
+    /// accumulated Update-time clock. New physics-time code should use OnFixedTick.
+    /// </summary>
     public Action<float> OnFixedUpdate
     {
       get => FixedUpdateStateFunction;
       set => FixedUpdateStateFunction = value;
     }
+    /// <summary>
+    /// Receives the scaled fixed delta and elapsed fixed time for this state.
+    /// Unlike the legacy OnFixedUpdate callback, both values are driven by FixedUpdate.
+    /// </summary>
+    public Action<float, float> OnFixedTick { get; set; }
     public Action<float> OnLateUpdate
     {
       get => LateUpdateStateFunction;
@@ -158,6 +214,11 @@ namespace Nopnag.StateMachineLib
       _graphHost.FixedUpdateAllGraphs();
     }
 
+    internal void FixedUpdateAllGraphs(float fixedDeltaTime)
+    {
+      _graphHost.FixedUpdateAllGraphs(fixedDeltaTime);
+    }
+
     // IPoweredNode implementation
     public bool HasPower => _poweredNode.HasPower;
 
@@ -186,17 +247,26 @@ namespace Nopnag.StateMachineLib
 
     public void SetParent(IPoweredNode? parent)
     {
+      var wasActive = IsActive;
       _poweredNode.SetParent(parent);
+      if (!wasActive && IsActive) RebaseUpdateClock();
     }
 
     public void SetTurnedOn(bool on)
     {
+      var wasActive = IsActive;
       _poweredNode.SetTurnedOn(on);
+      if (!wasActive && IsActive) RebaseUpdateClock();
     }
 
     public void UpdateAllGraphs()
     {
       _graphHost.UpdateAllGraphs();
+    }
+
+    internal void UpdateAllGraphs(float deltaTime)
+    {
+      _graphHost.UpdateAllGraphs(deltaTime);
     }
 
     public void At(float targetTime, Action callback)
@@ -216,7 +286,30 @@ namespace Nopnag.StateMachineLib
     }
 
     /// <summary>
+    /// Schedules a callback using this state's FixedElapsed clock.
+    /// </summary>
+    public void AtFixed(float targetTime, Action callback)
+    {
+      _fixedScheduledCallbacks.Add(new ScheduledCallback(targetTime, callback));
+    }
+
+    /// <summary>
+    /// Repeats a callback using this state's FixedElapsed clock.
+    /// </summary>
+    public void AtEveryFixed(float intervalTime, Action callback)
+    {
+      if (intervalTime <= 0f)
+      {
+        Debug.LogWarning("StateUnit.AtEveryFixed: intervalTime must be positive.");
+        return;
+      }
+
+      _fixedPeriodicCallbacks.Add(new PeriodicCallback(intervalTime, callback));
+    }
+
+    /// <summary>
     /// Subscribes to events of type T from both Global and Local EventBus, but only invokes the listener while this state is active.
+    /// A state entered by an event transition does not receive that same event raise.
     /// </summary>
     /// <typeparam name="T">The event type to listen for.</typeparam>
     /// <param name="listener">The callback to invoke when the event is raised and this state is active.</param>
@@ -227,7 +320,7 @@ namespace Nopnag.StateMachineLib
       var globalHandle = EventBus<T>.Listen(
         @event =>
         {
-          if (IsActive) listener.Invoke(@event);
+          if (CanProcessEvent(@event)) listener.Invoke(@event);
         }
       );
       _stateUnitEventBusListeners.Add(globalHandle);
@@ -238,7 +331,7 @@ namespace Nopnag.StateMachineLib
         var parentHandle = BaseGraph.LocalEventBus.On<T>().Listen(
           @event =>
           {
-            if (IsActive) listener.Invoke(@event);
+            if (CanProcessEvent(@event)) listener.Invoke(@event);
           }
         );
         _stateUnitEventBusListeners.Add(parentHandle);
@@ -248,7 +341,7 @@ namespace Nopnag.StateMachineLib
       var localHandle = LocalEventBus.On<T>().Listen(
         @event =>
         {
-          if (IsActive) listener.Invoke(@event);
+          if (CanProcessEvent(@event)) listener.Invoke(@event);
         }
       );
       _stateUnitEventBusListeners.Add(localHandle);
@@ -256,6 +349,7 @@ namespace Nopnag.StateMachineLib
 
     /// <summary>
     /// Subscribes to filtered events (via EventQuery) of type T from both Global and Local EventBus, but only invokes the listener while this state is active.
+    /// A state entered by an event transition does not receive that same event raise.
     /// </summary>
     /// <typeparam name="T">The event type to listen for.</typeparam>
     /// <param name="query">The EventQuery to filter which events to listen for.</param>
@@ -267,7 +361,7 @@ namespace Nopnag.StateMachineLib
       var globalHandle = query.Listen(
         @event =>
         {
-          if (IsActive) listener.Invoke(@event);
+          if (CanProcessEvent(@event)) listener.Invoke(@event);
         }
       );
       _stateUnitEventBusListeners.Add(globalHandle);
@@ -278,7 +372,7 @@ namespace Nopnag.StateMachineLib
         var parentHandle = BaseGraph.LocalEventBus.On<T>().Listen(
           @event =>
           {
-            if (IsActive) listener.Invoke(@event);
+            if (CanProcessEvent(@event)) listener.Invoke(@event);
           }
         );
         _stateUnitEventBusListeners.Add(parentHandle);
@@ -288,14 +382,22 @@ namespace Nopnag.StateMachineLib
       var localHandle = LocalEventBus.On<T>().Listen(
         @event =>
         {
-          if (IsActive) listener.Invoke(@event);
+          if (CanProcessEvent(@event)) listener.Invoke(@event);
         }
       );
       _stateUnitEventBusListeners.Add(localHandle);
     }
 
+    bool CanProcessEvent(BusEvent @event)
+    {
+      return IsActive
+             && BaseGraph != null
+             && BaseGraph.CanProcessEventRaise(@event.RaiseUniqueId);
+    }
+
     /// <summary>
     /// Subscribes to events of type T from both Global and Local EventBus, but only invokes the listener while this state is active.
+    /// A state entered by an event transition does not receive that same event raise.
     /// </summary>
     /// <typeparam name="T">The event type to listen for.</typeparam>
     /// <param name="listener">The callback to invoke when the event is raised and this state is active.</param>
@@ -306,6 +408,7 @@ namespace Nopnag.StateMachineLib
 
     /// <summary>
     /// Subscribes to filtered events (via EventQuery) of type T from both Global and Local EventBus, but only invokes the listener while this state is active.
+    /// A state entered by an event transition does not receive that same event raise.
     /// </summary>
     /// <typeparam name="T">The event type to listen for.</typeparam>
     /// <param name="query">The EventQuery to filter which events to listen for.</param>
@@ -414,7 +517,10 @@ namespace Nopnag.StateMachineLib
     internal void Start()
     {
       _previousTime       = Time.time;
+      DeltaTime           = 0f;
       DeltaTimeSinceStart = 0;
+      FixedDeltaTime      = 0f;
+      FixedElapsed        = 0f;
 
       EnterStateFunction?.Invoke();
 
@@ -435,15 +541,51 @@ namespace Nopnag.StateMachineLib
         _periodicCallbacks[i] = pc;
       }
 
-      CheckScheduledCallbacks();
-      CheckPeriodicCallbacks();
-      CheckTransitions();
+      for (var i = 0; i < _fixedScheduledCallbacks.Count; i++)
+      {
+        var sc = _fixedScheduledCallbacks[i];
+        sc.HasBeenInvoked           = false;
+        _fixedScheduledCallbacks[i] = sc;
+      }
+
+      for (var i = 0; i < _fixedPeriodicCallbacks.Count; i++)
+      {
+        var pc = _fixedPeriodicCallbacks[i];
+        pc.NextInvocationTime      = pc.IntervalTime;
+        _fixedPeriodicCallbacks[i] = pc;
+      }
+
+      if (!IsTimeFrozen)
+      {
+        CheckScheduledCallbacks();
+        CheckPeriodicCallbacks();
+        CheckTransitions();
+      }
     }
 
     internal bool Update()
     {
-      DeltaTimeSinceStart += (Time.time - _previousTime) * 1; // timescale here
-      _previousTime       =  Time.time;
+      var now = Time.time;
+      var deltaTime = Mathf.Max(0f, now - _previousTime);
+      return Update(deltaTime, now);
+    }
+
+    internal bool Update(float deltaTime)
+    {
+      return Update(deltaTime, Time.time);
+    }
+
+    bool Update(float deltaTime, float now)
+    {
+      _previousTime = now;
+      if (IsTimeFrozen)
+      {
+        DeltaTime = 0f;
+        return true;
+      }
+
+      DeltaTime = deltaTime * _localTimeScale;
+      DeltaTimeSinceStart += DeltaTime;
       UpdateStateBeforeTransitionCheckFunction?.Invoke(DeltaTimeSinceStart);
 
       CheckScheduledCallbacks();
@@ -454,21 +596,38 @@ namespace Nopnag.StateMachineLib
       UpdateStateFunction?.Invoke(DeltaTimeSinceStart);
 
       // Update all hosted graphs via GraphHost
-      UpdateAllGraphs();
+      UpdateAllGraphs(DeltaTime);
 
       return true;
     }
 
-    internal void FixedUpdate()
+    internal void AdvanceFixedTime(float fixedDeltaTime)
     {
+      FixedDeltaTime = fixedDeltaTime * _localTimeScale;
+      FixedElapsed += FixedDeltaTime;
+    }
+
+    internal bool FixedUpdateAfterTimeAdvance()
+    {
+      if (IsTimeFrozen) return true;
+
+      CheckFixedScheduledCallbacks();
+      CheckFixedPeriodicCallbacks();
+
+      if (CheckFixedTransitions()) return false;
+
+      // Preserve the legacy callback and its elapsed-Update argument.
       FixedUpdateStateFunction?.Invoke(DeltaTimeSinceStart);
+      OnFixedTick?.Invoke(FixedDeltaTime, FixedElapsed);
 
       // FixedUpdate all hosted graphs via GraphHost
-      FixedUpdateAllGraphs();
+      FixedUpdateAllGraphs(FixedDeltaTime);
+      return true;
     }
 
     internal void LateUpdate()
     {
+      if (IsTimeFrozen) return;
       LateUpdateStateFunction?.Invoke(DeltaTimeSinceStart);
 
       // LateUpdate all hosted graphs via GraphHost
@@ -508,6 +667,43 @@ namespace Nopnag.StateMachineLib
       }
     }
 
+    void CheckFixedPeriodicCallbacks()
+    {
+      for (var i = 0; i < _fixedPeriodicCallbacks.Count; i++)
+      {
+        var callback = _fixedPeriodicCallbacks[i];
+        var invoked = false;
+        while (HasReached(FixedElapsed, callback.NextInvocationTime) &&
+               callback.IntervalTime > 0f)
+        {
+          callback.Callback?.Invoke();
+          callback.NextInvocationTime += callback.IntervalTime;
+          invoked = true;
+        }
+
+        if (invoked) _fixedPeriodicCallbacks[i] = callback;
+      }
+    }
+
+    void CheckFixedScheduledCallbacks()
+    {
+      for (var i = 0; i < _fixedScheduledCallbacks.Count; i++)
+      {
+        var callback = _fixedScheduledCallbacks[i];
+        if (!callback.HasBeenInvoked && HasReached(FixedElapsed, callback.TargetTime))
+        {
+          callback.Callback?.Invoke();
+          callback.HasBeenInvoked = true;
+          _fixedScheduledCallbacks[i] = callback;
+        }
+      }
+    }
+
+    static bool HasReached(float elapsed, float target)
+    {
+      return elapsed >= target || Mathf.Approximately(elapsed, target);
+    }
+
     internal bool CheckTransitions()
     {
       // Debug.Log("Check transitions");
@@ -520,6 +716,25 @@ namespace Nopnag.StateMachineLib
         }
 
       return false;
+    }
+
+    internal bool CheckFixedTransitions()
+    {
+      StateUnit targetState;
+      for (var i = 0; i < FixedTransitions.Count; i++)
+        if (FixedTransitions[i].CheckTransition(FixedElapsed, out targetState))
+        {
+          BaseGraph.StartState(targetState);
+          return true;
+        }
+
+      return false;
+    }
+
+    internal void RebaseUpdateClock()
+    {
+      _previousTime = Time.time;
+      _graphHost.RebaseUpdateClocks();
     }
 
     internal void Exit()
@@ -539,6 +754,8 @@ namespace Nopnag.StateMachineLib
       // Clear callback lists to prevent memory leaks
       _scheduledCallbacks.Clear();
       _periodicCallbacks.Clear();
+      _fixedScheduledCallbacks.Clear();
+      _fixedPeriodicCallbacks.Clear();
 
       // Dispose GraphHost to clean up all hosted graphs
       _graphHost.Dispose();

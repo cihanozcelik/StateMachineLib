@@ -40,5 +40,25 @@ namespace Nopnag.StateMachineLib.Transition
       graphContext.AddAnyStateTransition(transition);
       return transition;
     }
+
+    public static ConditionalTransition ConnectFixed(
+      StateUnit sourceUnit,
+      Func<float, StateUnit> predicate)
+    {
+      if (sourceUnit == null) throw new ArgumentNullException(nameof(sourceUnit));
+      var transition = new ConditionalTransition(sourceUnit, predicate);
+      sourceUnit.FixedTransitions.Add(transition);
+      return transition;
+    }
+
+    public static ConditionalTransition ConnectFixed(
+      StateGraph graphContext,
+      Func<float, StateUnit> predicate)
+    {
+      if (graphContext == null) throw new ArgumentNullException(nameof(graphContext));
+      var transition = new ConditionalTransition(null, predicate, isAnySource: true);
+      graphContext.AddAnyStateFixedTransition(transition);
+      return transition;
+    }
   }
 }
