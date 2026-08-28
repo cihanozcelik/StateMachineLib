@@ -29,6 +29,7 @@ namespace Nopnag.StateMachineLib
 
     const    int MAX_STATE_CHANGES_PER_UPDATE = 10; // Safety break for chained transitions
     readonly List<IStateTransition> _anyStateTransitions = new();
+    readonly List<IStateTransition> _anyStateFixedTransitions = new();
     StateUnit _currentUnit;
     List<IIListener> _graphEventTransitionListeners = new();
     
@@ -101,6 +102,11 @@ namespace Nopnag.StateMachineLib
       _graphHost.FixedUpdateAllGraphs();
     }
 
+    internal void FixedUpdateAllGraphs(float fixedDeltaTime)
+    {
+      _graphHost.FixedUpdateAllGraphs(fixedDeltaTime);
+    }
+
     public bool                      HasPower     => _poweredNode.HasPower;
     public IReadOnlyList<StateGraph> HostedGraphs => _graphHost.HostedGraphs;
     public bool                      IsActive     => _poweredNode.IsActive;
@@ -129,17 +135,26 @@ namespace Nopnag.StateMachineLib
 
     void IPoweredNode.SetParent(IPoweredNode? parent)
     {
+      var wasActive = IsActive;
       _poweredNode.SetParent(parent);
+      if (!wasActive && IsActive) RebaseUpdateClocks();
     }
 
     public void SetTurnedOn(bool on)
     {
+      var wasActive = IsActive;
       _poweredNode.SetTurnedOn(on);
+      if (!wasActive && IsActive) RebaseUpdateClocks();
     }
 
     public void UpdateAllGraphs()
     {
       _graphHost.UpdateAllGraphs();
+    }
+
+    internal void UpdateAllGraphs(float deltaTime)
+    {
+      _graphHost.UpdateAllGraphs(deltaTime);
     }
 
     public StateUnit CreateState()
@@ -181,8 +196,50 @@ namespace Nopnag.StateMachineLib
 
     public void FixedUpdateGraph()
     {
+      FixedUpdateGraph(Time.fixedDeltaTime);
+    }
+
+    /// <summary>
+    /// Advances this graph using an explicit fixed delta. The delta is consumed by at most
+    /// one state even if fixed transitions chain within this tick.
+    /// </summary>
+    public void FixedUpdateGraph(float fixedDeltaTime)
+    {
       if (_isDisposedByParent) throw new ObjectDisposedException(nameof(StateGraph));
-      CurrentUnit?.FixedUpdate();
+      ValidateDeltaTime(fixedDeltaTime, nameof(fixedDeltaTime));
+      if (!IsGraphActive || CurrentUnit == null) return;
+      if (CurrentUnit.IsTimeFrozen)
+      {
+        CurrentUnit.AdvanceFixedTime(0f);
+        return;
+      }
+
+      var safetyBreak = 0;
+      var deltaConsumed = false;
+      var stateChangedInCycle = false;
+
+      do
+      {
+        if (CurrentUnit == null || CurrentUnit.IsTimeFrozen ||
+            safetyBreak++ >= MAX_STATE_CHANGES_PER_UPDATE)
+        {
+          if (safetyBreak >= MAX_STATE_CHANGES_PER_UPDATE)
+            Debug.LogWarning(
+              "StateGraph: Exceeded max state changes per fixed update cycle. Breaking loop.");
+          break;
+        }
+
+        var current = CurrentUnit;
+        current.AdvanceFixedTime(deltaConsumed ? 0f : fixedDeltaTime);
+        deltaConsumed = true;
+
+        stateChangedInCycle = TryAnyStateTransition(
+          _anyStateFixedTransitions,
+          current.FixedElapsed);
+        if (stateChangedInCycle) continue;
+
+        stateChangedInCycle = !current.FixedUpdateAfterTimeAdvance();
+      } while (stateChangedInCycle && safetyBreak < MAX_STATE_CHANGES_PER_UPDATE);
     }
 
     // --- Fluent API for Any State Transitions ---
@@ -229,6 +286,7 @@ namespace Nopnag.StateMachineLib
     public void LateUpdateGraph()
     {
       if (_isDisposedByParent) throw new ObjectDisposedException(nameof(StateGraph));
+      if (!IsGraphActive || CurrentUnit == null || CurrentUnit.IsTimeFrozen) return;
       CurrentUnit?.LateUpdate();
     }
 
@@ -267,10 +325,32 @@ namespace Nopnag.StateMachineLib
 
     public void UpdateGraph()
     {
+      UpdateGraphInternal(false, 0f);
+    }
+
+    /// <summary>
+    /// Advances this graph using an explicit Update delta. The delta is consumed by at most
+    /// one state even if transitions chain within this tick.
+    /// </summary>
+    public void UpdateGraph(float deltaTime)
+    {
+      ValidateDeltaTime(deltaTime, nameof(deltaTime));
+      UpdateGraphInternal(true, deltaTime);
+    }
+
+    void UpdateGraphInternal(bool hasExplicitDelta, float deltaTime)
+    {
       if (_isDisposedByParent) throw new ObjectDisposedException(nameof(StateGraph));
       if (!IsGraphActive || CurrentUnit == null) return;
 
+      if (CurrentUnit.IsTimeFrozen)
+      {
+        CurrentUnit.Update(0f);
+        return;
+      }
+
       var  safetyBreak = 0;
+      var  deltaConsumed = false;
       bool stateChangedInCycle;
 
       do
@@ -283,47 +363,30 @@ namespace Nopnag.StateMachineLib
           break;
         }
 
-        stateChangedInCycle = false;
-        var       deltaTimeInCurrentState   = CurrentUnit.DeltaTimeSinceStart;
-        StateUnit targetStateFromTransition = null;
-
-        // 1. Check Any-State Transitions
-        foreach (var transition in _anyStateTransitions)
+        if (CurrentUnit.IsTimeFrozen)
         {
-          var transitionShouldFire =
-            transition.CheckTransition(deltaTimeInCurrentState, out targetStateFromTransition);
-          // The IStateTransition.CheckTransition is expected to provide the targetState if it's dynamic
-
-          if (transitionShouldFire)
-          {
-            // Use the targetStateFromTransition if valid (e.g. from ConditionalTransition), otherwise fallback to transition.TargetUnit
-            var actualTarget = targetStateFromTransition ?? transition.TargetUnit;
-
-            if (actualTarget == null)
-            {
-              Debug.LogError(
-                $"Any-state transition ({transition.GetType().Name}, to '{transition.TargetUnitName}') fired but resolved target is null. Current state: '{CurrentUnit.Name}'. Skipping this transition.");
-              continue;
-            }
-
-            // Avoid immediate self-loop from Any to current for DirectTransition to prevent infinite state re-entry in one frame if not careful
-            if (transition is DirectTransition && actualTarget == CurrentUnit) continue;
-
-            // UnityEngine.Debug.Log($"Any-State Transition from {CurrentUnit.Name} to {actualTarget.Name}");
-            StartState(
-              actualTarget); // This calls Exit on old CurrentUnit, sets new CurrentUnit, calls Start on new CurrentUnit
-            stateChangedInCycle = true;
-            break;
-          }
+          CurrentUnit.RebaseUpdateClock();
+          break;
         }
 
+        stateChangedInCycle = TryAnyStateTransition(
+          _anyStateTransitions,
+          CurrentUnit.DeltaTimeSinceStart);
+
         if (stateChangedInCycle)
+        {
+          if (hasExplicitDelta) deltaConsumed = true;
           continue; // Restart loop to process new state (including its Any-State transitions again)
+        }
 
         // 2. If no any-state transition occurred, let the current unit process its update and local transitions.
         // StateUnit.Update() returns false if a local transition occurred (state changed), true otherwise.
         // The existing `StateUnit.Update()` calls `CheckTransitions()` which calls `BaseGraph.StartState()`.
-        if (CurrentUnit.Update()) // True if NO local transition occurred
+        var updateCompleted = hasExplicitDelta
+          ? CurrentUnit.Update(deltaConsumed ? 0f : deltaTime)
+          : CurrentUnit.Update();
+        deltaConsumed = true;
+        if (updateCompleted) // True if NO local transition occurred
           // No local transition, and no any-state transition in this iteration.
           // The update cycle for this CurrentUnit for this specific UpdateGraph() call is done.
           break; // Exit the do-while loop.
@@ -331,6 +394,38 @@ namespace Nopnag.StateMachineLib
           // A local transition occurred within CurrentUnit.Update(). CurrentUnit has changed.
           stateChangedInCycle = true; // Ensure the loop continues to process the new state.
       } while (stateChangedInCycle && safetyBreak < MAX_STATE_CHANGES_PER_UPDATE);
+    }
+
+    bool TryAnyStateTransition(List<IStateTransition> transitions, float elapsedTime)
+    {
+      StateUnit targetStateFromTransition;
+      for (var i = 0; i < transitions.Count; i++)
+      {
+        var transition = transitions[i];
+        if (!transition.CheckTransition(elapsedTime, out targetStateFromTransition)) continue;
+
+        var actualTarget = targetStateFromTransition ?? transition.TargetUnit;
+        if (actualTarget == null)
+        {
+          Debug.LogError(
+            $"Any-state transition ({transition.GetType().Name}, to '{transition.TargetUnitName}') fired but resolved target is null. Current state: '{CurrentUnit.Name}'. Skipping this transition.");
+          continue;
+        }
+
+        if (transition is DirectTransition && actualTarget == CurrentUnit) continue;
+
+        StartState(actualTarget);
+        return true;
+      }
+
+      return false;
+    }
+
+    static void ValidateDeltaTime(float deltaTime, string parameterName)
+    {
+      if (float.IsNaN(deltaTime) || float.IsInfinity(deltaTime) || deltaTime < 0f)
+        throw new ArgumentOutOfRangeException(parameterName, deltaTime,
+          "Delta time must be finite and greater than or equal to zero.");
     }
 
     void ClearSubscriptions()
@@ -348,6 +443,17 @@ namespace Nopnag.StateMachineLib
     {
       if (transition == null) throw new ArgumentNullException(nameof(transition));
       _anyStateTransitions.Add(transition);
+    }
+
+    internal void AddAnyStateFixedTransition(IStateTransition transition)
+    {
+      if (transition == null) throw new ArgumentNullException(nameof(transition));
+      _anyStateFixedTransitions.Add(transition);
+    }
+
+    internal void RebaseUpdateClocks()
+    {
+      CurrentUnit?.RebaseUpdateClock();
     }
 
     internal void RegisterEventTransitionListener(IIListener listener)

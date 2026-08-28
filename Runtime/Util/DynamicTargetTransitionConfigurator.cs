@@ -59,5 +59,21 @@ namespace Nopnag.StateMachineLib.Util
                 return ConditionalTransition.Connect(_graphContext, dynamicTargetPredicate);
             }
         }
+
+        /// <summary>
+        /// Defines a dynamic target transition evaluated only during FixedUpdate.
+        /// The predicate receives the source state's FixedElapsed value.
+        /// </summary>
+        public ConditionalTransition WhenFixed(Func<float, StateUnit> dynamicTargetPredicate)
+        {
+            if (dynamicTargetPredicate == null) throw new ArgumentNullException(nameof(dynamicTargetPredicate));
+
+            if (_sourceUnit != null)
+            {
+                return ConditionalTransition.ConnectFixed(_sourceUnit, dynamicTargetPredicate);
+            }
+
+            return ConditionalTransition.ConnectFixed(_graphContext, dynamicTargetPredicate);
+        }
     }
-} 
+}

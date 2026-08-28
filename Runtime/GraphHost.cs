@@ -68,6 +68,14 @@ namespace Nopnag.StateMachineLib
       for (var i = 0; i < _hostedGraphs.Count; i++) _hostedGraphs[i].FixedUpdateGraph();
     }
 
+    internal void FixedUpdateAllGraphs(float fixedDeltaTime)
+    {
+      if (_isDisposed) throw new ObjectDisposedException(nameof(GraphHost));
+
+      for (var i = 0; i < _hostedGraphs.Count; i++)
+        _hostedGraphs[i].FixedUpdateGraph(fixedDeltaTime);
+    }
+
     public IReadOnlyList<StateGraph> HostedGraphs => _hostedGraphs.AsReadOnly();
 
     /// <summary>
@@ -108,6 +116,22 @@ namespace Nopnag.StateMachineLib
       if (_isDisposed) throw new ObjectDisposedException(nameof(GraphHost));
 
       for (var i = 0; i < _hostedGraphs.Count; i++) _hostedGraphs[i].UpdateGraph();
+    }
+
+    internal void UpdateAllGraphs(float deltaTime)
+    {
+      if (_isDisposed) throw new ObjectDisposedException(nameof(GraphHost));
+
+      for (var i = 0; i < _hostedGraphs.Count; i++)
+        _hostedGraphs[i].UpdateGraph(deltaTime);
+    }
+
+    internal void RebaseUpdateClocks()
+    {
+      if (_isDisposed) return;
+
+      for (var i = 0; i < _hostedGraphs.Count; i++)
+        _hostedGraphs[i].RebaseUpdateClocks();
     }
 
     /// <summary>

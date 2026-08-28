@@ -66,6 +66,15 @@ namespace Nopnag.StateMachineLib
       _graphHost.FixedUpdateAllGraphs();
     }
 
+    /// <summary>
+    /// Fixed-updates all hosted graphs with an explicit delta without starting the
+    /// state machine. Prefer FixedUpdateMachine(float) for normal driving code.
+    /// </summary>
+    public void FixedUpdateAllGraphs(float fixedDeltaTime)
+    {
+      _graphHost.FixedUpdateAllGraphs(fixedDeltaTime);
+    }
+
     // IPoweredNode implementation
     public bool HasPower => _poweredNode.HasPower;
 
@@ -99,12 +108,23 @@ namespace Nopnag.StateMachineLib
 
     public void SetTurnedOn(bool on)
     {
+      var wasActive = IsActive;
       _poweredNode.SetTurnedOn(on);
+      if (!wasActive && IsActive) _graphHost.RebaseUpdateClocks();
     }
 
     public void UpdateAllGraphs()
     {
       _graphHost.UpdateAllGraphs();
+    }
+
+    /// <summary>
+    /// Updates all hosted graphs with an explicit delta without starting the state
+    /// machine. Prefer UpdateMachine(float) for normal driving code.
+    /// </summary>
+    public void UpdateAllGraphs(float deltaTime)
+    {
+      _graphHost.UpdateAllGraphs(deltaTime);
     }
 
     public void Exit()
@@ -121,6 +141,17 @@ namespace Nopnag.StateMachineLib
       if (_isDisposed) throw new ObjectDisposedException(nameof(StateMachine));
       if (!_isStarted) Start();
       FixedUpdateAllGraphs();
+    }
+
+    /// <summary>
+    /// Fixed-updates all graphs with an explicit delta for deterministic simulation.
+    /// Existing parameterless callers remain supported.
+    /// </summary>
+    public void FixedUpdateMachine(float fixedDeltaTime)
+    {
+      if (_isDisposed) throw new ObjectDisposedException(nameof(StateMachine));
+      if (!_isStarted) Start();
+      FixedUpdateAllGraphs(fixedDeltaTime);
     }
 
     public void LateUpdateMachine()
@@ -160,6 +191,17 @@ namespace Nopnag.StateMachineLib
       if (_isDisposed) throw new ObjectDisposedException(nameof(StateMachine));
       if (!_isStarted) Start();
       UpdateAllGraphs();
+    }
+
+    /// <summary>
+    /// Updates all graphs with an explicit delta for deterministic simulation.
+    /// Existing parameterless callers retain their wall-clock behavior.
+    /// </summary>
+    public void UpdateMachine(float deltaTime)
+    {
+      if (_isDisposed) throw new ObjectDisposedException(nameof(StateMachine));
+      if (!_isStarted) Start();
+      UpdateAllGraphs(deltaTime);
     }
   }
 }

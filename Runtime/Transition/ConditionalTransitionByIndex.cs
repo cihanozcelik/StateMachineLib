@@ -45,5 +45,16 @@ namespace Nopnag.StateMachineLib.Transition
       var transition = new ConditionalTransitionByIndex(sourceUnit, targetStateInfos, predicate);
       sourceUnit.Transitions.Add(transition);
     }
+
+    public static void ConnectFixed(
+      StateUnit sourceUnit,
+      StateUnit[] targetStateInfos,
+      Func<float, int> predicate
+    )
+    {
+      if (sourceUnit == null) throw new ArgumentNullException(nameof(sourceUnit));
+      var transition = new ConditionalTransitionByIndex(sourceUnit, targetStateInfos, predicate);
+      sourceUnit.FixedTransitions.Add(transition);
+    }
   }
 }

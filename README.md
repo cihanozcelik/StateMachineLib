@@ -342,6 +342,66 @@ myState.At(2.5f, () => {
 });
 ```
 
+### Fixed-Time API and Backward Compatibility
+
+The existing Update-time API remains unchanged:
+
+* `DeltaTimeSinceStart`, `OnUpdate`, `At`, `AtEvery`, `When`, and `After` use the Update clock.
+* Parameterless `UpdateMachine()`, `FixedUpdateMachine()`, `UpdateGraph()`, and `FixedUpdateGraph()` remain supported.
+* The existing `OnFixedUpdate(float updateElapsed)` callback is preserved with its original contract: its argument is still `DeltaTimeSinceStart`, not fixed elapsed time.
+
+New code that needs a real physics clock should use the additive fixed-time API:
+
+```csharp
+attackState.OnFixedTick = (fixedDelta, fixedElapsed) =>
+{
+    body.MovePosition(body.position + velocity * fixedDelta);
+};
+
+attackState.AtFixed(0.10f, OpenHitWindow);
+attackState.AtEveryFixed(0.05f, EmitTrailSample);
+
+(attackState > recoveryState).AfterFixed(0.30f);
+(groundedState > airborneState).WhenFixed(
+    fixedElapsed => !motor.IsGrounded);
+```
+
+The relevant values are:
+
+* `DeltaTime`: scaled delta consumed by the latest Update tick.
+* `DeltaTimeSinceStart`: accumulated scaled Update time; retained for compatibility.
+* `FixedDeltaTime`: scaled delta consumed by the latest FixedUpdate tick.
+* `FixedElapsed`: accumulated scaled FixedUpdate time since state entry.
+
+Update and fixed clocks are independent. Calling `UpdateMachine(...)` does not advance `FixedElapsed`, and calling `FixedUpdateMachine(...)` does not advance `DeltaTimeSinceStart`. All four values reset when the state is entered or re-entered.
+
+For deterministic simulation and tests, explicit-delta overloads are available without replacing the existing APIs:
+
+```csharp
+stateMachine.UpdateMachine(1f / 60f);
+stateMachine.FixedUpdateMachine(1f / 50f);
+```
+
+If a transition enters another state during a tick, the new state does not consume that tick's delta again. Its elapsed clock starts at zero and advances on the next relevant tick.
+
+### Per-State Local Time Scale
+
+`LocalTimeScale` affects only its `StateUnit` and graphs hosted by that state:
+
+```csharp
+attackState.LocalTimeScale = 1.0f; // Normal speed.
+attackState.LocalTimeScale = 0.5f; // Half speed.
+attackState.LocalTimeScale = 0.0f; // Freeze time-driven state execution.
+```
+
+The scale is applied to both Update and FixedUpdate deltas. It therefore affects state elapsed values, timed callbacks, polling transitions, `OnFixedTick`, and hosted graph ticks. Nested states apply their own scale to the already-scaled parent delta.
+
+At zero scale, Update, FixedUpdate, LateUpdate, timed callbacks, polling transitions, and hosted graph ticks do not run. The state remains active: EventBus handlers and event-driven transitions can still process events. Use the existing `SetTurnedOn(false)` power/pause mechanism when event processing must also stop.
+
+Gameplay code that should respect `LocalTimeScale` must use `StateUnit.DeltaTime` or the `fixedDelta` supplied to `OnFixedTick`, rather than reading `Time.deltaTime` or `Time.fixedDeltaTime` directly inside the state callback.
+
+`LocalTimeScale` must be finite and greater than or equal to zero. It is state configuration and is not reset on re-entry; only the elapsed clocks are reset.
+
 ## Simplified MonoBehaviour Integration (Recommended)
 
 For the easiest and most robust way to use StateMachineLib with Unity's `MonoBehaviour` lifecycle, use the `CreateManagedStateMachine()` extension method. This method handles all the necessary setup for automatic updates and lifecycle management, tied directly to your `MonoBehaviour`.
@@ -446,6 +506,19 @@ StateUnit readyState = myGraph.CreateState();
 // Transition from loadingState to readyState after 2.5 seconds
 (loadingState > readyState).After(2.5f);
 ```
+
+### Fixed-time transitions
+
+`WhenFixed` and `AfterFixed` are evaluated only by FixedUpdate and receive/use `FixedElapsed`:
+
+```csharp
+(movingState > idleState).WhenFixed(
+    fixedElapsed => motor.Speed <= 0.01f);
+
+(attackState > recoveryState).AfterFixed(0.25f);
+```
+
+The same `WhenFixed` option is available for dynamic-target and indexed transition configurators. Existing `When` and `After` remain Update-time APIs.
 
 ### `(fromState > toState).On<TEvent>(...) (for EventBus Events)`:
 
