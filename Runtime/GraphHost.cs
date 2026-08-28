@@ -93,9 +93,14 @@ namespace Nopnag.StateMachineLib
 
       // Raise on own LocalEventBus
       _localEventBus.Raise(busEvent);
+      if (busEvent.IsPropagationStopped) return;
 
       // Propagate to all hosted subgraphs
-      for (var i = 0; i < _hostedGraphs.Count; i++) _hostedGraphs[i].LocalRaise(busEvent);
+      for (var i = 0; i < _hostedGraphs.Count; i++)
+      {
+        _hostedGraphs[i].LocalRaise(busEvent);
+        if (busEvent.IsPropagationStopped) return;
+      }
     }
 
     public void UpdateAllGraphs()
