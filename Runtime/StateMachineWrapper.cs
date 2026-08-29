@@ -6,14 +6,29 @@ using UnityEngine;
 [DisallowMultipleComponent]
 public class StateMachineWrapper : MonoBehaviour
 {
+  sealed class ManagedStateMachineEntry
+  {
+    public readonly MonoBehaviour Owner;
+    public readonly StateMachine StateMachine;
+    public bool Removed;
+
+    public ManagedStateMachineEntry(MonoBehaviour owner, StateMachine stateMachine)
+    {
+      Owner        = owner;
+      StateMachine = stateMachine;
+    }
+  }
+
   // Track if OnEnable was called (to differentiate first creation vs re-enable)
   bool _hasBeenDisabled = false;
-  // Dictionary: MonoBehaviour -> StateMachine mapping
-  Dictionary<MonoBehaviour, StateMachine> _managedStateMachines = new();
+  // Dictionary: MonoBehaviour -> managed entry mapping
+  Dictionary<MonoBehaviour, ManagedStateMachineEntry> _managedStateMachines = new();
+  // Stable iteration order without copying the dictionary every update phase
+  List<ManagedStateMachineEntry> _managedStateMachineEntries = new();
   // Track which StateMachines haven't been Started yet (created while owner was disabled)
   HashSet<StateMachine> _pendingStartStateMachines = new();
-  // Cached list to avoid allocations during iteration
-  List<KeyValuePair<MonoBehaviour, StateMachine>> _cachedPairs = new();
+  int  _activeIterationCount;
+  bool _needsCompaction;
   
   // Cached actions to avoid lambda allocations every frame
   Action<StateMachine> _updateAction;
@@ -37,11 +52,13 @@ public class StateMachineWrapper : MonoBehaviour
       Debug.LogWarning(
         $"StateMachine already exists for {owner.GetType().Name} on {owner.gameObject.name}. Returning existing instance.",
         owner);
-      return _managedStateMachines[owner];
+      return _managedStateMachines[owner].StateMachine;
     }
 
-    var sm = new StateMachine();
-    _managedStateMachines[owner] = sm;
+    var sm    = new StateMachine();
+    var entry = new ManagedStateMachineEntry(owner, sm);
+    _managedStateMachines[owner] = entry;
+    _managedStateMachineEntries.Add(entry);
     
     // Allow user to set up the StateMachine
     setupCallback(sm);
@@ -91,10 +108,13 @@ public class StateMachineWrapper : MonoBehaviour
   {
     if (owner == null) return;
 
-    if (_managedStateMachines.TryGetValue(owner, out var sm))
+    if (_managedStateMachines.TryGetValue(owner, out var entry))
     {
+      UnregisterEntry(entry);
+
       try
       {
+        var sm = entry.StateMachine;
         sm?.Exit();
         sm?.Dispose();
       }
@@ -103,9 +123,6 @@ public class StateMachineWrapper : MonoBehaviour
         Debug.LogError($"Exception while removing StateMachine for {owner.GetType().Name}: {ex}",
           owner);
       }
-
-      _managedStateMachines.Remove(owner);
-      _pendingStartStateMachines.Remove(sm); // Clean up pending start tracking
     }
   }
 
@@ -141,10 +158,12 @@ public class StateMachineWrapper : MonoBehaviour
   {
     // GameObject is being destroyed
     // First, call Exit on all state machines while GameObjects are still alive
-    foreach (var kvp in _managedStateMachines)
+    foreach (var entry in _managedStateMachineEntries)
     {
-      var owner = kvp.Key;
-      var sm    = kvp.Value;
+      if (entry.Removed) continue;
+
+      var owner = entry.Owner;
+      var sm    = entry.StateMachine;
 
       // Only call Exit if owner still exists
       // (might have been destroyed before this wrapper's OnDestroy)
@@ -161,9 +180,11 @@ public class StateMachineWrapper : MonoBehaviour
     }
 
     // Then dispose all state machines
-    foreach (var kvp in _managedStateMachines)
+    foreach (var entry in _managedStateMachineEntries)
     {
-      var sm = kvp.Value;
+      if (entry.Removed) continue;
+
+      var sm = entry.StateMachine;
       try
       {
         sm?.Dispose();
@@ -175,6 +196,8 @@ public class StateMachineWrapper : MonoBehaviour
     }
 
     _managedStateMachines.Clear();
+    _managedStateMachineEntries.Clear();
+    _pendingStartStateMachines.Clear();
   }
 
   void Update()
@@ -203,64 +226,77 @@ public class StateMachineWrapper : MonoBehaviour
   }
 #endif
 
-  void CleanupStateMachine(MonoBehaviour owner, StateMachine sm)
+  void CleanupStateMachine(ManagedStateMachineEntry entry)
   {
     // Owner MonoBehaviour was destroyed
     // We're in an Update call, so child objects might already be destroyed
     // Skip Exit to avoid exceptions, go straight to Dispose
 
+    UnregisterEntry(entry);
+
     try
     {
-      sm?.Dispose();
+      entry.StateMachine?.Dispose();
     }
     catch (Exception ex)
     {
       Debug.LogError($"Exception during StateMachine cleanup: {ex}", this);
     }
-
-    if (owner != null) // Might be null if destroyed
-      _managedStateMachines.Remove(owner);
   }
 
   void UpdateAllStateMachines(Action<StateMachine> updateAction)
   {
-    // Iterate through all managed state machines
-    // Use cached list to avoid allocations every frame
-    _cachedPairs.Clear();
-    _cachedPairs.AddRange(_managedStateMachines);
+    // Capture the count so entries created by a callback begin updating next phase,
+    // matching the previous dictionary-snapshot behavior.
+    var entryCount = _managedStateMachineEntries.Count;
+    _activeIterationCount++;
 
-    foreach (var kvp in _cachedPairs)
+    try
     {
-      var owner = kvp.Key;
-      var sm    = kvp.Value;
-
-      // Check if owner MonoBehaviour still exists (not destroyed)
-      if (owner == null || !owner)
+      for (var i = 0; i < entryCount; i++)
       {
-        // Owner destroyed, clean up this state machine
-        CleanupStateMachine(owner, sm);
-        continue;
+        var entry = _managedStateMachineEntries[i];
+        if (entry.Removed) continue;
+
+        var owner = entry.Owner;
+        var sm    = entry.StateMachine;
+
+        // Check if owner MonoBehaviour still exists (not destroyed)
+        if (!owner)
+        {
+          // Owner destroyed, clean up this state machine
+          CleanupStateMachine(entry);
+          continue;
+        }
+
+        // The wrapper and owner share a GameObject. Unity only invokes this method
+        // while that GameObject is active; OnDisable/OnEnable handles hierarchy changes.
+        var shouldBeActive = owner.enabled;
+
+        // Control power based on owner's active state
+        // This pauses the state machine (no updates, no event callbacks) without calling Exit
+        if (sm.IsTurnedOn != shouldBeActive) sm.SetTurnedOn(shouldBeActive);
+
+        // Only update if owner MonoBehaviour is enabled
+        if (shouldBeActive) updateAction?.Invoke(sm);
       }
-
-      // Check if owner is active and enabled
-      var shouldBeActive = owner.enabled && owner.gameObject.activeInHierarchy;
-
-      // Control power based on owner's active state
-      // This pauses the state machine (no updates, no event callbacks) without calling Exit
-      if (sm.IsTurnedOn != shouldBeActive) sm.SetTurnedOn(shouldBeActive);
-
-      // Only update if owner MonoBehaviour is enabled and GameObject is active
-      if (shouldBeActive) updateAction?.Invoke(sm);
-      // If disabled or inactive, state machine is paused (power off, no updates, no events)
+    }
+    finally
+    {
+      _activeIterationCount--;
+      if (_activeIterationCount == 0 && _needsCompaction)
+        CompactRemovedEntries();
     }
   }
 
   void UpdateAllStateMachinesPower(bool turnOn)
   {
-    foreach (var kvp in _managedStateMachines)
+    foreach (var entry in _managedStateMachineEntries)
     {
-      var owner = kvp.Key;
-      var sm    = kvp.Value;
+      if (entry.Removed) continue;
+
+      var owner = entry.Owner;
+      var sm    = entry.StateMachine;
 
       if (owner == null || !owner) continue;
 
@@ -271,5 +307,44 @@ public class StateMachineWrapper : MonoBehaviour
       if (sm.IsTurnedOn != shouldBeActive)
         sm.SetTurnedOn(shouldBeActive);
     }
+  }
+
+  void UnregisterEntry(ManagedStateMachineEntry entry)
+  {
+    if (entry.Removed) return;
+
+    entry.Removed = true;
+    _managedStateMachines.Remove(entry.Owner);
+    _pendingStartStateMachines.Remove(entry.StateMachine);
+
+    if (_activeIterationCount > 0)
+    {
+      _needsCompaction = true;
+      return;
+    }
+
+    _managedStateMachineEntries.Remove(entry);
+  }
+
+  void CompactRemovedEntries()
+  {
+    var writeIndex = 0;
+
+    for (var readIndex = 0; readIndex < _managedStateMachineEntries.Count; readIndex++)
+    {
+      var entry = _managedStateMachineEntries[readIndex];
+      if (entry.Removed) continue;
+
+      if (writeIndex != readIndex)
+        _managedStateMachineEntries[writeIndex] = entry;
+
+      writeIndex++;
+    }
+
+    if (writeIndex < _managedStateMachineEntries.Count)
+      _managedStateMachineEntries.RemoveRange(writeIndex,
+        _managedStateMachineEntries.Count - writeIndex);
+
+    _needsCompaction = false;
   }
 }
