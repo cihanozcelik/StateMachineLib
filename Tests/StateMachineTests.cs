@@ -1690,6 +1690,136 @@ namespace Nopnag.StateMachineLib.Tests
     }
 
     [UnityTest]
+    public IEnumerator StateMachineWrapper_ParentSetActive_PausesAndResumesStateMachine()
+    {
+      var parent = new GameObject("StateMachineParent");
+      var child  = new GameObject("StateMachineChild");
+      child.transform.SetParent(parent.transform);
+
+      var owner       = child.AddComponent<TestMonoBehaviourForWrapper>();
+      var updateCount = 0;
+
+      owner.CreateManagedStateMachine(sm =>
+      {
+        var graph = sm.CreateGraph();
+        var state = graph.CreateState();
+        graph.InitialUnit = state;
+        state.OnUpdate    = _ => updateCount++;
+      });
+
+      yield return null;
+      Assert.AreEqual(1, updateCount);
+
+      parent.SetActive(false);
+      yield return null;
+      yield return null;
+      Assert.AreEqual(1, updateCount,
+        "State machine updated while an ancestor GameObject was inactive.");
+
+      parent.SetActive(true);
+      yield return null;
+      Assert.AreEqual(2, updateCount,
+        "State machine did not resume after its ancestor GameObject was reactivated.");
+
+      Object.DestroyImmediate(parent);
+    }
+
+    [UnityTest]
+    public IEnumerator StateMachineWrapper_RemoveDuringUpdate_DoesNotSkipRemainingMachine()
+    {
+      var go      = new GameObject("StateMachineRemovalDuringUpdate");
+      var ownerA  = go.AddComponent<TestMonoBehaviourForWrapper>();
+      var ownerB  = go.AddComponent<TestMonoBehaviourForWrapper>();
+      var ownerC  = go.AddComponent<TestMonoBehaviourForWrapper>();
+      var wrapper = StateMachineWrapper.GetOrCreate(go);
+
+      var updateOrder = string.Empty;
+
+      ownerA.CreateManagedStateMachine(sm =>
+      {
+        var graph = sm.CreateGraph();
+        var state = graph.CreateState();
+        graph.InitialUnit = state;
+        state.OnUpdate = _ =>
+        {
+          updateOrder += "A";
+          wrapper.RemoveStateMachineFor(ownerB);
+        };
+      });
+
+      ownerB.CreateManagedStateMachine(sm =>
+      {
+        var graph = sm.CreateGraph();
+        var state = graph.CreateState();
+        graph.InitialUnit = state;
+        state.OnUpdate    = _ => updateOrder += "B";
+      });
+
+      ownerC.CreateManagedStateMachine(sm =>
+      {
+        var graph = sm.CreateGraph();
+        var state = graph.CreateState();
+        graph.InitialUnit = state;
+        state.OnUpdate    = _ => updateOrder += "C";
+      });
+
+      yield return null;
+      Assert.AreEqual("AC", updateOrder,
+        "Removing one machine during update skipped or reordered a surviving machine.");
+
+      updateOrder = string.Empty;
+      yield return null;
+      Assert.AreEqual("AC", updateOrder,
+        "Entry order changed after deferred removal was compacted.");
+
+      Object.DestroyImmediate(go);
+    }
+
+    [UnityTest]
+    public IEnumerator StateMachineWrapper_DestroyedOwner_IsRemovedWithoutAffectingOthers()
+    {
+      var go              = new GameObject("StateMachineDestroyedOwner");
+      var destroyedOwner  = go.AddComponent<TestMonoBehaviourForWrapper>();
+      var survivingOwner  = go.AddComponent<TestMonoBehaviourForWrapper>();
+      var exitCount       = 0;
+      var survivorUpdates = 0;
+
+      destroyedOwner.CreateManagedStateMachine(sm =>
+      {
+        var graph = sm.CreateGraph();
+        var state = graph.CreateState();
+        graph.InitialUnit = state;
+        state.OnExit      = () => exitCount++;
+      });
+
+      survivingOwner.CreateManagedStateMachine(sm =>
+      {
+        var graph = sm.CreateGraph();
+        var state = graph.CreateState();
+        graph.InitialUnit = state;
+        state.OnUpdate    = _ => survivorUpdates++;
+      });
+
+      yield return null;
+      Assert.AreEqual(1, survivorUpdates);
+
+      Object.DestroyImmediate(destroyedOwner);
+      yield return null;
+
+      Assert.AreEqual(1, exitCount,
+        "Destroyed owner's state machine was not disposed exactly once.");
+      Assert.AreEqual(2, survivorUpdates,
+        "Destroying one owner interrupted another owner's state machine.");
+
+      yield return null;
+      Assert.AreEqual(1, exitCount,
+        "Destroyed owner's state machine remained registered and was disposed again.");
+      Assert.AreEqual(3, survivorUpdates);
+
+      Object.DestroyImmediate(go);
+    }
+
+    [UnityTest]
     public IEnumerator
       StateMachineWrapper_OnExit_AccessesDestroyedChildObject_ShouldNotThrowException()
     {
