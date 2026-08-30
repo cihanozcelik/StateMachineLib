@@ -799,10 +799,10 @@ in `Nopnag.StateMachineLib`.
 
 StateMachineLib does not promise that arbitrary API use is allocation-free.
 
-The existing automated allocation test covers only a warmed, manually driven,
-explicit-delta Update and FixedUpdate path on a small prepared topology. It does not
-cover managed wrapper ticks, first use, events, setup mutation, attach/detach, shutdown,
-or user callbacks.
+The automated allocation tests cover a warmed, manually driven explicit-delta Update
+and FixedUpdate path on a small prepared topology, plus warmed managed wrapper Update
+and FixedUpdate ticks with 64 owners. They do not cover first use, events, setup
+mutation, attach/detach, shutdown, or arbitrary user callbacks.
 
 Allocate and prepare before interactive runtime:
 

@@ -9,6 +9,17 @@ namespace Nopnag.StateMachineLib
 {
   public class StateUnit : IGraphHost, IPoweredNode
   {
+    [Flags]
+    enum FixedTickCapabilities : byte
+    {
+      None              = 0,
+      ScheduledCallback = 1 << 0,
+      PeriodicCallback  = 1 << 1,
+      StateCallback     = 1 << 2,
+      HostedGraph       = 1 << 3,
+      StateTransition   = 1 << 4
+    }
+
     struct PeriodicCallback
     {
       public float  IntervalTime;
@@ -72,6 +83,9 @@ namespace Nopnag.StateMachineLib
     readonly PoweredNode _poweredNode;
     float                _previousTime;
     float                _localTimeScale = 1f;
+    FixedTickCapabilities _fixedTickCapabilities;
+    Action<float, float>  _onFixedTick;
+    int                   _pendingFixedScheduledCallbacks;
 
     readonly List<ScheduledCallback> _scheduledCallbacks         = new();
     readonly List<ScheduledCallback> _fixedScheduledCallbacks    = new();
@@ -156,13 +170,25 @@ namespace Nopnag.StateMachineLib
     public Action<float> OnFixedUpdate
     {
       get => FixedUpdateStateFunction;
-      set => FixedUpdateStateFunction = value;
+      set
+      {
+        FixedUpdateStateFunction = value;
+        RefreshFixedCallbackCapability();
+      }
     }
     /// <summary>
     /// Receives the scaled fixed delta and elapsed fixed time for this state.
     /// Unlike the legacy OnFixedUpdate callback, both values are driven by FixedUpdate.
     /// </summary>
-    public Action<float, float> OnFixedTick { get; set; }
+    public Action<float, float> OnFixedTick
+    {
+      get => _onFixedTick;
+      set
+      {
+        _onFixedTick = value;
+        RefreshFixedCallbackCapability();
+      }
+    }
     public Action<float> OnLateUpdate
     {
       get => LateUpdateStateFunction;
@@ -189,12 +215,14 @@ namespace Nopnag.StateMachineLib
     {
       AttachChild(graph);
       _graphHost.AttachGraph(graph);
+      _fixedTickCapabilities |= FixedTickCapabilities.HostedGraph;
     }
 
     public StateGraph CreateGraph()
     {
       var graph = _graphHost.CreateGraph();
       AttachChild(graph);
+      _fixedTickCapabilities |= FixedTickCapabilities.HostedGraph;
       return graph;
     }
 
@@ -207,6 +235,8 @@ namespace Nopnag.StateMachineLib
     {
       DetachChild(graph);
       _graphHost.DetachGraph(graph);
+      if (!_graphHost.HasHostedGraphs)
+        _fixedTickCapabilities &= ~FixedTickCapabilities.HostedGraph;
     }
 
     public void FixedUpdateAllGraphs()
@@ -291,6 +321,8 @@ namespace Nopnag.StateMachineLib
     public void AtFixed(float targetTime, Action callback)
     {
       _fixedScheduledCallbacks.Add(new ScheduledCallback(targetTime, callback));
+      _pendingFixedScheduledCallbacks++;
+      _fixedTickCapabilities |= FixedTickCapabilities.ScheduledCallback;
     }
 
     /// <summary>
@@ -305,6 +337,7 @@ namespace Nopnag.StateMachineLib
       }
 
       _fixedPeriodicCallbacks.Add(new PeriodicCallback(intervalTime, callback));
+      _fixedTickCapabilities |= FixedTickCapabilities.PeriodicCallback;
     }
 
     /// <summary>
@@ -547,6 +580,9 @@ namespace Nopnag.StateMachineLib
         sc.HasBeenInvoked           = false;
         _fixedScheduledCallbacks[i] = sc;
       }
+      _pendingFixedScheduledCallbacks = _fixedScheduledCallbacks.Count;
+      if (_pendingFixedScheduledCallbacks != 0)
+        _fixedTickCapabilities |= FixedTickCapabilities.ScheduledCallback;
 
       for (var i = 0; i < _fixedPeriodicCallbacks.Count; i++)
       {
@@ -611,18 +647,69 @@ namespace Nopnag.StateMachineLib
     {
       if (IsTimeFrozen) return true;
 
-      CheckFixedScheduledCallbacks();
-      CheckFixedPeriodicCallbacks();
+      if ((_fixedTickCapabilities & FixedTickCapabilities.ScheduledCallback) != 0)
+        CheckFixedScheduledCallbacks();
+      if ((_fixedTickCapabilities & FixedTickCapabilities.PeriodicCallback) != 0)
+        CheckFixedPeriodicCallbacks();
 
-      if (CheckFixedTransitions()) return false;
+      if (((_fixedTickCapabilities & FixedTickCapabilities.StateTransition) != 0 ||
+           FixedTransitions.Count != 0) && CheckFixedTransitions()) return false;
 
       // Preserve the legacy callback and its elapsed-Update argument.
-      FixedUpdateStateFunction?.Invoke(DeltaTimeSinceStart);
-      OnFixedTick?.Invoke(FixedDeltaTime, FixedElapsed);
+      if ((_fixedTickCapabilities & FixedTickCapabilities.StateCallback) != 0 ||
+          FixedUpdateStateFunction != null || _onFixedTick != null)
+      {
+        FixedUpdateStateFunction?.Invoke(DeltaTimeSinceStart);
+        _onFixedTick?.Invoke(FixedDeltaTime, FixedElapsed);
+      }
 
       // FixedUpdate all hosted graphs via GraphHost
-      FixedUpdateAllGraphs(FixedDeltaTime);
+      if ((_fixedTickCapabilities & FixedTickCapabilities.HostedGraph) != 0 &&
+          _graphHost.HasActiveHostedGraphs)
+        FixedUpdateAllGraphs(FixedDeltaTime);
       return true;
+    }
+
+    /// <summary>
+    /// Whether this state needs the full fixed dispatch path after its clock advances.
+    /// FixedTransitions remains public for compatibility, so its count is included as a
+    /// fallback for callers that mutate the list directly instead of using the fluent API.
+    /// </summary>
+    internal bool RequiresFixedTickDispatch
+    {
+      get
+      {
+        if ((_fixedTickCapabilities & FixedTickCapabilities.StateCallback) != 0 &&
+            FixedUpdateStateFunction == null && _onFixedTick == null)
+          _fixedTickCapabilities &= ~FixedTickCapabilities.StateCallback;
+
+        if ((_fixedTickCapabilities & FixedTickCapabilities.StateTransition) != 0 &&
+            FixedTransitions.Count == 0)
+          _fixedTickCapabilities &= ~FixedTickCapabilities.StateTransition;
+
+        var nonGraphCapabilities =
+          _fixedTickCapabilities & ~FixedTickCapabilities.HostedGraph;
+        return nonGraphCapabilities != FixedTickCapabilities.None ||
+               FixedUpdateStateFunction != null || _onFixedTick != null ||
+               FixedTransitions.Count != 0 ||
+               ((_fixedTickCapabilities & FixedTickCapabilities.HostedGraph) != 0 &&
+                _graphHost.HasActiveHostedGraphs);
+      }
+    }
+
+    internal void AddFixedTransition(IStateTransition transition)
+    {
+      if (transition == null) throw new ArgumentNullException(nameof(transition));
+      FixedTransitions.Add(transition);
+      _fixedTickCapabilities |= FixedTickCapabilities.StateTransition;
+    }
+
+    void RefreshFixedCallbackCapability()
+    {
+      if (FixedUpdateStateFunction != null || _onFixedTick != null)
+        _fixedTickCapabilities |= FixedTickCapabilities.StateCallback;
+      else
+        _fixedTickCapabilities &= ~FixedTickCapabilities.StateCallback;
     }
 
     internal void LateUpdate()
@@ -695,8 +782,12 @@ namespace Nopnag.StateMachineLib
           callback.Callback?.Invoke();
           callback.HasBeenInvoked = true;
           _fixedScheduledCallbacks[i] = callback;
+          _pendingFixedScheduledCallbacks--;
         }
       }
+
+      if (_pendingFixedScheduledCallbacks == 0)
+        _fixedTickCapabilities &= ~FixedTickCapabilities.ScheduledCallback;
     }
 
     static bool HasReached(float elapsed, float target)
@@ -720,6 +811,14 @@ namespace Nopnag.StateMachineLib
 
     internal bool CheckFixedTransitions()
     {
+      if (FixedTransitions.Count == 0)
+      {
+        // FixedTransitions is public for backwards compatibility and may be cleared
+        // directly. Repair the cached topology bit on the first tick after that change.
+        _fixedTickCapabilities &= ~FixedTickCapabilities.StateTransition;
+        return false;
+      }
+
       StateUnit targetState;
       for (var i = 0; i < FixedTransitions.Count; i++)
         if (FixedTransitions[i].CheckTransition(FixedElapsed, out targetState))
@@ -756,6 +855,8 @@ namespace Nopnag.StateMachineLib
       _periodicCallbacks.Clear();
       _fixedScheduledCallbacks.Clear();
       _fixedPeriodicCallbacks.Clear();
+      _pendingFixedScheduledCallbacks = 0;
+      _fixedTickCapabilities &= FixedTickCapabilities.StateCallback;
 
       // Dispose GraphHost to clean up all hosted graphs
       _graphHost.Dispose();
