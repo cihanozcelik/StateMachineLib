@@ -61,7 +61,7 @@ namespace Nopnag.StateMachineLib.Transition
     {
       if (sourceUnit == null) throw new ArgumentNullException(nameof(sourceUnit));
       var transition = new BasicTransition(sourceUnit, targetUnit, predicate);
-      sourceUnit.FixedTransitions.Add(transition);
+      sourceUnit.AddFixedTransition(transition);
     }
 
     public static void ConnectFixed(

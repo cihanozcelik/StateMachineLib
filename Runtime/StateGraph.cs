@@ -30,6 +30,7 @@ namespace Nopnag.StateMachineLib
     const    int MAX_STATE_CHANGES_PER_UPDATE = 10; // Safety break for chained transitions
     readonly List<IStateTransition> _anyStateTransitions = new();
     readonly List<IStateTransition> _anyStateFixedTransitions = new();
+    bool _hasAnyStateFixedTransitions;
     StateUnit _currentUnit;
     List<IIListener> _graphEventTransitionListeners = new();
     
@@ -214,6 +215,15 @@ namespace Nopnag.StateMachineLib
         return;
       }
 
+      // Most states have no fixed timers, polling transitions, callbacks, or child
+      // graphs. Their public fixed clock must still advance, but the safety loop and
+      // all dispatch scans can be skipped.
+      if (!_hasAnyStateFixedTransitions && !CurrentUnit.RequiresFixedTickDispatch)
+      {
+        CurrentUnit.AdvanceFixedTime(fixedDeltaTime);
+        return;
+      }
+
       var safetyBreak = 0;
       var deltaConsumed = false;
       var stateChangedInCycle = false;
@@ -233,12 +243,16 @@ namespace Nopnag.StateMachineLib
         current.AdvanceFixedTime(deltaConsumed ? 0f : fixedDeltaTime);
         deltaConsumed = true;
 
-        stateChangedInCycle = TryAnyStateTransition(
-          _anyStateFixedTransitions,
-          current.FixedElapsed);
-        if (stateChangedInCycle) continue;
+        if (_hasAnyStateFixedTransitions)
+        {
+          stateChangedInCycle = TryAnyStateTransition(
+            _anyStateFixedTransitions,
+            current.FixedElapsed);
+          if (stateChangedInCycle) continue;
+        }
 
-        stateChangedInCycle = !current.FixedUpdateAfterTimeAdvance();
+        stateChangedInCycle = current.RequiresFixedTickDispatch &&
+                              !current.FixedUpdateAfterTimeAdvance();
       } while (stateChangedInCycle && safetyBreak < MAX_STATE_CHANGES_PER_UPDATE);
     }
 
@@ -449,6 +463,7 @@ namespace Nopnag.StateMachineLib
     {
       if (transition == null) throw new ArgumentNullException(nameof(transition));
       _anyStateFixedTransitions.Add(transition);
+      _hasAnyStateFixedTransitions = true;
     }
 
     internal void RebaseUpdateClocks()

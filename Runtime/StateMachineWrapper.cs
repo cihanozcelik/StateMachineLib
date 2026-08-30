@@ -215,6 +215,18 @@ public class StateMachineWrapper : MonoBehaviour
     UpdateAllStateMachines(_lateUpdateAction);
   }
 
+  // Direct entry points keep the allocation regression test outside Unity's frame/test
+  // runner bookkeeping while exercising the exact same warmed wrapper paths.
+  internal void UpdateManagedStateMachinesForTesting()
+  {
+    UpdateAllStateMachines(_updateAction);
+  }
+
+  internal void FixedUpdateManagedStateMachinesForTesting()
+  {
+    UpdateAllStateMachines(_fixedUpdateAction);
+  }
+
 #if UNITY_EDITOR
   // Debug info in Inspector
   void OnValidate()

@@ -54,7 +54,7 @@ namespace Nopnag.StateMachineLib.Transition
     {
       if (sourceUnit == null) throw new ArgumentNullException(nameof(sourceUnit));
       var transition = new ConditionalTransitionByIndex(sourceUnit, targetStateInfos, predicate);
-      sourceUnit.FixedTransitions.Add(transition);
+      sourceUnit.AddFixedTransition(transition);
     }
   }
 }

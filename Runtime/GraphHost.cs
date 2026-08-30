@@ -79,6 +79,24 @@ namespace Nopnag.StateMachineLib
     public IReadOnlyList<StateGraph> HostedGraphs => _hostedGraphs.AsReadOnly();
 
     /// <summary>
+    /// Cheap topology capability used by the tick paths. Unlike HostedGraphs this does
+    /// not create an AsReadOnly wrapper.
+    /// </summary>
+    internal bool HasHostedGraphs => _hostedGraphs.Count != 0;
+
+    internal bool HasActiveHostedGraphs
+    {
+      get
+      {
+        for (var i = 0; i < _hostedGraphs.Count; i++)
+          if (_hostedGraphs[i].IsGraphActive)
+            return true;
+
+        return false;
+      }
+    }
+
+    /// <summary>
     /// Late updates all hosted graphs by calling their LateUpdateGraph method.
     /// </summary>
     public void LateUpdateAllGraphs()
