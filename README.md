@@ -883,3 +883,13 @@ The repository tests provide evidence for:
 They do not cover every known issue. Consult [KNOWN_ISSUES.md](KNOWN_ISSUES.md) before
 expanding lifecycle, dynamic topology, filtered local events, or strict allocation
 claims.
+
+## Session lifetime regression coverage
+
+SessionLifetimeTests exercises manual start/dispose, synchronous managed start,
+disabled-owner pause/resume, owner-only destruction, wrapper destruction, and five
+successive owner lifetimes using global/local transitions. Disposal is checked before
+ClearAll so bus cleanup cannot mask leaked StateMachine subscriptions. These tests
+require the companion EventBusLib ClearAll revision. StateMachine runtime code has
+not changed. They do not replace five actual Editor Play/Stop cycles with scene reload
+on and domain reload off, or target-device allocation profiling.
