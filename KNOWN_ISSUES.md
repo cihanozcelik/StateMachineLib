@@ -79,8 +79,16 @@ State entry synchronously evaluates zero-time polling transitions. A self-target
 `MAX_STATE_CHANGES_PER_UPDATE` loop and can cause stack overflow.
 
 Callbacks can also synchronously raise events or call `StartState` while an outer
-entry, exit, timer, or update callback is still executing. The outer callback path is
-not cancelled when reentrant code changes the current state.
+entry, exit, timer, or update callback is still executing. User callback code is not
+unwound when reentrant code changes the current state.
+
+Timer dispatch now commits one-shot/periodic bookkeeping before invoking user code
+and detects state exit/re-entry with a per-state lifetime version. After a timer
+callback changes that lifetime, its old timer pass and the rest of that pass's
+entry/tick processing stop. This includes same-state re-entry and preserves the new
+entry's fixed timer count/capability. It does not make recursive zero-time entry safe,
+or cancel the separate continuation paths after `OnEnter`, `OnExit`, or ordinary
+Update/Fixed/Late callbacks.
 
 **Safe usage:** Immediate transition graphs must be acyclic. Do not call `StartState`
 or synchronously raise state-changing events from lifecycle callbacks unless the
@@ -91,8 +99,15 @@ reentrancy has a tested, terminating design.
 - `Runtime/StateGraph.cs:30,304-324,352-397`
 - `Runtime/StateUnit.cs:517-601,707-716`
 
+**Regression coverage:** `Tests/TimerReentryTests.cs` exercises all four timer APIs
+with same-state and away-and-back re-entry, synchronous local-event re-entry,
+remaining callback/transition/hosted-tick suppression, graph exit and machine
+disposal, and the fixed one-shot fast path. It also covers bounded zero-time entry
+re-entry and normal periodic catch-up without a state change.
+
 **Missing coverage:** Immediate self-loop, multi-state immediate cycle, and state
-changes from `OnEnter`, `OnExit`, timers, and update callbacks.
+changes from `OnEnter`, `OnExit`, and ordinary update callbacks remain outside this
+timer fix and its regression tests.
 
 ### SM-004 — Start, exit, disposal, and managed setup are not exception-atomic
 
