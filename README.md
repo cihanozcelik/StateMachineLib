@@ -378,6 +378,21 @@ state.AtEveryFixed(0.10f, EmitPhysicsPulse);
 - A large elapsed jump can cause an unbounded periodic catch-up loop. Bound external
   deltas or use a purpose-built bounded callback policy.
 
+Timer bookkeeping is committed **before** invoking user code. If a timer callback
+exits or re-enters its state, including a transition back to the same `StateUnit`,
+the old timer pass stops after that callback returns. Remaining timers, periodic
+catch-up invocations, polling transitions and tick callbacks from that pass do not
+run. The newly entered state's timers keep their reset values, including the fixed
+timer fast-path count and flags; the old callback cannot consume them. Entry itself
+remains synchronous, so zero-time entry callbacks still run on the new entry.
+
+This stops the library's continuation, not the caller's C# callback: code after
+`LocalRaise` or `StartState` in that callback still executes. A zero-time callback
+that repeatedly re-enters itself can still recurse without bound; see
+[SM-003](KNOWN_ISSUES.md#sm-003--immediate-transition-cycles-can-bypass-the-per-tick-safety-cap).
+Prefer an explicit transition for a timed state change rather than calling
+`StartState` from an `At`/`AtFixed` callback.
+
 ### Per-state local time scale
 
 ```csharp
@@ -402,6 +417,15 @@ The scale is configuration and persists across state re-entry; elapsed clocks re
 All transition delegates and transition objects should be constructed before the
 machine starts. Transition order is definition/list order; the first matching polling
 transition wins.
+
+Model ordinary behavior changes with these prepared transitions. State callbacks
+perform the current state's work; the graph declares the conditions, events and
+deadlines that change states. Use source-specific transitions for a normal sequence
+and any-state transitions for interruptions that apply across that graph.
+`StartState` is an advanced synchronous entry operation, useful for explicitly owned
+lifecycle resets. Do not use calls scattered through tick or timer callbacks as a
+replacement for the normal transition graph. Changing a call to an event alone does
+not remove reentrancy: event transitions are synchronous too.
 
 ### Conditional and delayed Update transitions
 
@@ -735,7 +759,7 @@ normal manual machine.
 | `InitialUnit` | Mutable initial state; must belong to this graph. |
 | `CurrentUnit` | Current state; throws after parent disposal. |
 | `EnterGraph`, `ExitGraph` | Synchronous manual entry/exit. |
-| `StartState` | Advanced synchronous state change; target must belong to graph. |
+| `StartState` | Advanced synchronous entry, e.g. an owned lifecycle reset; prefer prepared transitions for normal flow. Target must belong to graph. |
 | `UpdateGraph` / `(float)` | Drive graph Update; explicit form validates delta. |
 | `FixedUpdateGraph` / `(float)` | Drive graph FixedUpdate; explicit form validates delta. |
 | `LateUpdateGraph` | Drive graph LateUpdate. |
@@ -852,6 +876,9 @@ Before shipping a StateMachineLib flow, verify all of the following:
 - Fresh graphs are attached before start; detached graphs are not abandoned.
 - Hierarchical graphs are hosted by the owning `StateUnit`.
 - Immediate transition chains terminate.
+- Normal behavior changes are declared as prepared transitions; direct `StartState`
+  calls have an explicit lifecycle reason. Timer re-entry does not rely on old-pass
+  callbacks continuing after a state change.
 - All callbacks, predicates, timers, transitions, and listeners are constructed before
   interactive runtime.
 - Local filtered listeners/transitions use an explicit event predicate until SM-006 is

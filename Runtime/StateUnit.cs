@@ -83,6 +83,9 @@ namespace Nopnag.StateMachineLib
     readonly PoweredNode _poweredNode;
     float                _previousTime;
     float                _localTimeScale = 1f;
+    // Timer dispatch belongs to one entry. Exit/re-entry invalidates an outer pass,
+    // even when the graph's current state is the same StateUnit again.
+    ulong                _timerPassVersion;
     FixedTickCapabilities _fixedTickCapabilities;
     Action<float, float>  _onFixedTick;
     int                   _pendingFixedScheduledCallbacks;
@@ -549,6 +552,7 @@ namespace Nopnag.StateMachineLib
 
     internal void Start()
     {
+      unchecked { _timerPassVersion++; }
       _previousTime       = Time.time;
       DeltaTime           = 0f;
       DeltaTimeSinceStart = 0;
@@ -593,8 +597,7 @@ namespace Nopnag.StateMachineLib
 
       if (!IsTimeFrozen)
       {
-        CheckScheduledCallbacks();
-        CheckPeriodicCallbacks();
+        if (!CheckScheduledCallbacks() || !CheckPeriodicCallbacks()) return;
         CheckTransitions();
       }
     }
@@ -624,8 +627,7 @@ namespace Nopnag.StateMachineLib
       DeltaTimeSinceStart += DeltaTime;
       UpdateStateBeforeTransitionCheckFunction?.Invoke(DeltaTimeSinceStart);
 
-      CheckScheduledCallbacks();
-      CheckPeriodicCallbacks();
+      if (!CheckScheduledCallbacks() || !CheckPeriodicCallbacks()) return true;
 
       if (CheckTransitions()) return false;
 
@@ -647,10 +649,10 @@ namespace Nopnag.StateMachineLib
     {
       if (IsTimeFrozen) return true;
 
-      if ((_fixedTickCapabilities & FixedTickCapabilities.ScheduledCallback) != 0)
-        CheckFixedScheduledCallbacks();
-      if ((_fixedTickCapabilities & FixedTickCapabilities.PeriodicCallback) != 0)
-        CheckFixedPeriodicCallbacks();
+      if ((_fixedTickCapabilities & FixedTickCapabilities.ScheduledCallback) != 0 &&
+          !CheckFixedScheduledCallbacks()) return true;
+      if ((_fixedTickCapabilities & FixedTickCapabilities.PeriodicCallback) != 0 &&
+          !CheckFixedPeriodicCallbacks()) return true;
 
       if (((_fixedTickCapabilities & FixedTickCapabilities.StateTransition) != 0 ||
            FixedTransitions.Count != 0) && CheckFixedTransitions()) return false;
@@ -721,73 +723,83 @@ namespace Nopnag.StateMachineLib
       LateUpdateAllGraphs();
     }
 
-    void CheckPeriodicCallbacks()
+    bool CheckPeriodicCallbacks()
     {
+      var version = _timerPassVersion;
       for (var i = 0; i < _periodicCallbacks.Count; i++)
       {
-        var pc            = _periodicCallbacks[i]; // Get a copy of the struct
-        var invokedInLoop = false;
+        var callback = _periodicCallbacks[i];
 
-        while (DeltaTimeSinceStart >= pc.NextInvocationTime && pc.IntervalTime > 0)
+        while (DeltaTimeSinceStart >= callback.NextInvocationTime && callback.IntervalTime > 0f)
         {
-          pc.Callback?.Invoke();
-          pc.NextInvocationTime += pc.IntervalTime;
-          invokedInLoop         =  true;
+          callback.NextInvocationTime += callback.IntervalTime;
+          _periodicCallbacks[i] = callback;
+          callback.Callback?.Invoke();
+          if (version != _timerPassVersion) return false;
         }
-
-        if (invokedInLoop) _periodicCallbacks[i] = pc; // Assign the modified copy back
       }
+
+      return true;
     }
 
-    void CheckScheduledCallbacks()
+    bool CheckScheduledCallbacks()
     {
+      var version = _timerPassVersion;
       for (var i = 0; i < _scheduledCallbacks.Count; i++)
       {
-        var scheduledCallback = _scheduledCallbacks[i]; // Get a copy of the struct
-        if (!scheduledCallback.HasBeenInvoked &&
-            DeltaTimeSinceStart >= scheduledCallback.TargetTime)
+        var callback = _scheduledCallbacks[i];
+        if (!callback.HasBeenInvoked && DeltaTimeSinceStart >= callback.TargetTime)
         {
-          scheduledCallback.Callback?.Invoke();
-          scheduledCallback.HasBeenInvoked = true;
-          _scheduledCallbacks[i]           = scheduledCallback; // Assign the modified copy back
+          callback.HasBeenInvoked = true;
+          _scheduledCallbacks[i] = callback;
+          callback.Callback?.Invoke();
+          if (version != _timerPassVersion) return false;
         }
       }
+
+      return true;
     }
 
-    void CheckFixedPeriodicCallbacks()
+    bool CheckFixedPeriodicCallbacks()
     {
+      var version = _timerPassVersion;
       for (var i = 0; i < _fixedPeriodicCallbacks.Count; i++)
       {
         var callback = _fixedPeriodicCallbacks[i];
-        var invoked = false;
         while (HasReached(FixedElapsed, callback.NextInvocationTime) &&
                callback.IntervalTime > 0f)
         {
-          callback.Callback?.Invoke();
           callback.NextInvocationTime += callback.IntervalTime;
-          invoked = true;
+          _fixedPeriodicCallbacks[i] = callback;
+          callback.Callback?.Invoke();
+          if (version != _timerPassVersion) return false;
         }
-
-        if (invoked) _fixedPeriodicCallbacks[i] = callback;
       }
+
+      return true;
     }
 
-    void CheckFixedScheduledCallbacks()
+    bool CheckFixedScheduledCallbacks()
     {
+      var version = _timerPassVersion;
       for (var i = 0; i < _fixedScheduledCallbacks.Count; i++)
       {
         var callback = _fixedScheduledCallbacks[i];
         if (!callback.HasBeenInvoked && HasReached(FixedElapsed, callback.TargetTime))
         {
-          callback.Callback?.Invoke();
           callback.HasBeenInvoked = true;
           _fixedScheduledCallbacks[i] = callback;
           _pendingFixedScheduledCallbacks--;
+          // Commit before user code: re-entry can reset both the count and the
+          // fast-path capability. The old dispatch must not overwrite either.
+          if (_pendingFixedScheduledCallbacks == 0)
+            _fixedTickCapabilities &= ~FixedTickCapabilities.ScheduledCallback;
+          callback.Callback?.Invoke();
+          if (version != _timerPassVersion) return false;
         }
       }
 
-      if (_pendingFixedScheduledCallbacks == 0)
-        _fixedTickCapabilities &= ~FixedTickCapabilities.ScheduledCallback;
+      return true;
     }
 
     static bool HasReached(float elapsed, float target)
@@ -838,6 +850,7 @@ namespace Nopnag.StateMachineLib
 
     internal void Exit()
     {
+      unchecked { _timerPassVersion++; }
       // Exit all hosted graphs via GraphHost
       _graphHost.ExitAllGraphs();
 
