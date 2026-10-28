@@ -14,7 +14,7 @@ using UnityEngine;
 
 namespace Nopnag.StateMachineLib
 {
-  public class StateGraph : IGraphHost, IPoweredNode, ISaveable<StateGraphSnapshot>
+  public class StateGraph : IGraphHost, IPoweredNode
   {
     public static readonly AnyStateMarker
       Any = new(); // Using without explicit namespace as it's now in Nopnag.StateMachineLib

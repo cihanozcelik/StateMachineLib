@@ -415,14 +415,14 @@ The scale is configuration and persists across state re-entry; elapsed clocks re
 
 ## Save and load
 
-`StateMachine` and `StateGraph` implement `ISaveable<TSnapshot>`:
+`StateMachine` and `StateGraph` have a matching pair:
 
 ```csharp
-public interface ISaveable<TSnapshot>
-{
-  TSnapshot Save();
-  void Load(TSnapshot snapshot);
-}
+StateMachineSnapshot snapshot = machine.Save();
+machine.Load(snapshot);
+
+StateGraphSnapshot graphSnapshot = graph.Save();
+graph.Load(graphSnapshot);
 ```
 
 `Save` copies every runtime variable the library owns, for every graph and state
@@ -476,12 +476,13 @@ hosted graphs, then the graph's own hosted graphs. States are identified by thei
 index in `StateGraph.States`; -1 is none.
 
 **The developer's variables.** A state's behavior also depends on the owner's
-fields, closure data and services, which the library cannot see. The owner
-implements the same interface and keeps the machine's snapshot beside its own
-variables:
+fields, closure data and services, which the library cannot see. The owner keeps
+the machine's snapshot beside its own variables. The library defines no save
+interface: the application's own save contract decides how owners are saved,
+ordered and stored.
 
 ```csharp
-public sealed class Fighter : MonoBehaviour, ISaveable<FighterSnapshot>
+public sealed class Fighter : MonoBehaviour
 {
   public FighterSnapshot Save() =>
     new() { Machine = _machine.Save(), Charges = _charges, Target = _target.Id };
@@ -830,7 +831,7 @@ inconsistent; see [SM-011](KNOWN_ISSUES.md#sm-011--disposed-machines-can-still-r
 | `LocalRaise<T>` | Raise and forward a local event downward. |
 | `SetTurnedOn` | Pause/resume power without exit. |
 | `Exit`, `Reset` | Restartable exit variants with different power timing. |
-| `Save`, `Load` | `ISaveable<StateMachineSnapshot>`; see [Save and load](#save-and-load). |
+| `Save`, `Load` | Save the machine's runtime variables and load them back; see [Save and load](#save-and-load). |
 | `Dispose` | Terminal cleanup for attached graphs and subscriptions. |
 | `HasPower`, `IsTurnedOn`, `IsActive` | Power-state inspection. |
 
@@ -847,7 +848,7 @@ normal manual machine.
 | `InitialUnit` | Mutable initial state; must belong to this graph. |
 | `CurrentUnit` | Current state; throws after parent disposal. |
 | `States` | States in creation order; snapshots identify states by this index. |
-| `Save`, `Load` | `ISaveable<StateGraphSnapshot>` for this graph and its descendants; see [Save and load](#save-and-load). |
+| `Save`, `Load` | Save and load this graph and its descendants; see [Save and load](#save-and-load). |
 | `EnterGraph`, `ExitGraph` | Synchronous manual entry/exit. |
 | `StartState` | Advanced synchronous entry, e.g. an owned lifecycle reset; prefer prepared transitions for normal flow. Target must belong to graph. |
 | `UpdateGraph` / `(float)` | Drive graph Update; explicit form validates delta. |
@@ -901,7 +902,6 @@ a second ownership topology with them.
 
 | Type | Purpose |
 |---|---|
-| `ISaveable<TSnapshot>` | `Save()` and `Load(snapshot)`; implemented by `StateMachine`, `StateGraph` and owners. |
 | `StateMachineSnapshot` | Started flag, power switch, root graph count, and every graph and state in save order. |
 | `StateGraphSnapshot` | One graph and its descendants in save order; the first graph is the saved graph. |
 | `SavedGraph` | One graph: power switch, initial and current state indices, state and hosted graph counts. |
@@ -1001,8 +1001,8 @@ Before shipping a StateMachineLib flow, verify all of the following:
 - Shutdown uses the correct owner: managed removal for managed machines, and
   `Exit` plus `Dispose` for terminal manual ownership.
 - The actual warmed gameplay and rare paths have been checked in the Unity Profiler.
-- A saveable owner implements `ISaveable`, keeps its machine's snapshot beside its own
-  fields, and keeps no mutable data in captured lambda locals.
+- A saved owner keeps its machine's snapshot beside its own fields and keeps no
+  mutable data in captured lambda locals.
 - A snapshot is loaded into a topology built in the same order as the saved one.
 
 ## Test coverage map

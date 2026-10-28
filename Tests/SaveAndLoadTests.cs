@@ -9,7 +9,7 @@ using Object = UnityEngine.Object;
 
 namespace Nopnag.StateMachineLib.Tests
 {
-  // ISaveable on StateMachine and StateGraph: a snapshot copies every runtime variable
+  // Save and Load on StateMachine and StateGraph: a snapshot copies every runtime variable
   // of the library, and a machine that loads it continues exactly like the machine
   // that saved it.
   public sealed class SaveAndLoadTests
@@ -101,9 +101,9 @@ namespace Nopnag.StateMachineLib.Tests
       public int                  Charges;
     }
 
-    // How a developer saves what the library cannot see: the owner implements the same
-    // interface and keeps its own variables beside the machine's snapshot.
-    sealed class Owner : ISaveable<OwnerSnapshot>
+    // How a developer saves what the library cannot see: the owner keeps its own
+    // variables beside the machine's snapshot.
+    sealed class Owner
     {
       public readonly Rig Rig = new();
       public          int Charges;

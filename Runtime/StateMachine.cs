@@ -4,8 +4,7 @@ using Nopnag.EventBusLib;
 
 namespace Nopnag.StateMachineLib
 {
-  public class StateMachine : IGraphHost, IDisposable, IPoweredNode,
-    ISaveable<StateMachineSnapshot>
+  public class StateMachine : IGraphHost, IDisposable, IPoweredNode
   {
     readonly GraphHost _graphHost;
 
