@@ -359,14 +359,18 @@ namespace Nopnag.StateMachineLib
     }
 
     /// <summary>
-    /// Loads a snapshot saved from a graph with the same topology. No OnEnter or OnExit
-    /// runs and nothing is evaluated; the next tick continues from the saved values.
+    /// Loads a snapshot saved from a graph with the same topology. The whole snapshot is
+    /// compared with the topology first: a mismatch throws InvalidOperationException and
+    /// changes nothing. No OnEnter or OnExit runs and nothing is evaluated; the next
+    /// tick continues from the saved values.
     /// </summary>
     public void Load(StateGraphSnapshot snapshot)
     {
+      var check = new SnapshotReader(snapshot.Graphs, snapshot.States);
+      Check(ref check);
+      check.RequireFullyRead();
       var reader = new SnapshotReader(snapshot.Graphs, snapshot.States);
       Load(ref reader);
-      reader.RequireFullyRead();
     }
 
     internal void Save(SnapshotWriter writer)
@@ -385,15 +389,26 @@ namespace Nopnag.StateMachineLib
       _graphHost.Save(writer);
     }
 
-    internal void Load(ref SnapshotReader reader)
+    // Compares the snapshot with this graph's topology without changing anything.
+    internal void Check(ref SnapshotReader reader)
     {
       if (_isDisposedByParent) throw new ObjectDisposedException(nameof(StateGraph));
 
-      var saved = reader.Graphs[reader.NextGraph++];
+      var saved = reader.NextGraphEntry();
       GraphHost.RequireCount(saved.StateCount, _units.Count, "states of a graph");
       GraphHost.RequireCount(saved.HostedGraphCount, _graphHost.HostedGraphCount,
         "hosted graphs of a graph");
+      if (saved.Initial < -1 || saved.Initial >= _units.Count ||
+          saved.Current < -1 || saved.Current >= _units.Count)
+        throw new InvalidOperationException(
+          $"The snapshot names state {saved.Initial} or {saved.Current} but this graph has {_units.Count}.");
+      for (var i = 0; i < _units.Count; i++) _units[i].Check(ref reader);
+      _graphHost.Check(ref reader);
+    }
 
+    internal void Load(ref SnapshotReader reader)
+    {
+      var saved = reader.Graphs[reader.NextGraph++];
       _poweredNode.SetTurnedOn(saved.TurnedOn);
       InitialUnit  = saved.Initial < 0 ? null : _units[saved.Initial];
       _currentUnit = saved.Current < 0 ? null : _units[saved.Current];

@@ -885,12 +885,10 @@ namespace Nopnag.StateMachineLib
       _graphHost.Save(writer);
     }
 
-    // Writes every saved value back. Only two values are not copied: the Update
-    // clock's previous wall-clock time is set to now, so time before the load is not
-    // consumed, and a timer pass in progress is stopped.
-    internal void Load(ref SnapshotReader reader)
+    // Compares the snapshot with this state's topology without changing anything.
+    internal void Check(ref SnapshotReader reader)
     {
-      var saved = reader.States[reader.NextState++];
+      var saved = reader.NextStateEntry();
       GraphHost.RequireCount(saved.HostedGraphCount, _graphHost.HostedGraphCount,
         "hosted graphs of a state");
       GraphHost.RequireCount(saved.AtInvoked.Length, _scheduledCallbacks.Count, "At timers");
@@ -900,7 +898,16 @@ namespace Nopnag.StateMachineLib
         "AtFixed timers");
       GraphHost.RequireCount(saved.AtEveryFixedNext.Length, _fixedPeriodicCallbacks.Count,
         "AtEveryFixed timers");
+      _graphHost.Check(ref reader);
+    }
 
+    // Writes every saved value back. Only two values are not copied: the Update
+    // clock's previous wall-clock time is set to now, so time before the load is not
+    // consumed, and a timer pass in progress is stopped. Check has already compared
+    // the snapshot with this topology.
+    internal void Load(ref SnapshotReader reader)
+    {
+      var saved = reader.States[reader.NextState++];
       unchecked { _timerPassVersion++; }
       _poweredNode.SetTurnedOn(saved.TurnedOn);
       _localTimeScale     = saved.LocalTimeScale;

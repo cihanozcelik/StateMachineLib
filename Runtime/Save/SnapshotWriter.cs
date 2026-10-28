@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 
 namespace Nopnag.StateMachineLib
@@ -9,7 +10,7 @@ namespace Nopnag.StateMachineLib
     public readonly List<SavedState> States = new();
   }
 
-  // Walks a snapshot in save order while a load walks the same topology.
+  // Walks a snapshot in save order while a check or a load walks the same topology.
   internal struct SnapshotReader
   {
     public SavedGraph[] Graphs;
@@ -23,6 +24,22 @@ namespace Nopnag.StateMachineLib
       States    = states;
       NextGraph = 0;
       NextState = 0;
+    }
+
+    public SavedGraph NextGraphEntry()
+    {
+      if (NextGraph == Graphs.Length)
+        throw new InvalidOperationException(
+          $"The snapshot has {Graphs.Length} graphs but this topology has more.");
+      return Graphs[NextGraph++];
+    }
+
+    public SavedState NextStateEntry()
+    {
+      if (NextState == States.Length)
+        throw new InvalidOperationException(
+          $"The snapshot has {States.Length} states but this topology has more.");
+      return States[NextState++];
     }
 
     // The snapshot must hold exactly the topology that was walked.

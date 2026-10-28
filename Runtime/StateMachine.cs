@@ -209,18 +209,23 @@ namespace Nopnag.StateMachineLib
 
     /// <summary>
     /// Loads a snapshot saved from a machine with the same topology, started or not.
-    /// No OnEnter or OnExit runs and nothing is evaluated. A loaded started machine is
+    /// The whole snapshot is compared with the topology first: a mismatch throws
+    /// InvalidOperationException and changes nothing. No OnEnter or OnExit runs and
+    /// nothing is evaluated. A loaded started machine is
     /// not entered again by Start or a lazy-starting tick.
     /// </summary>
     public void Load(StateMachineSnapshot snapshot)
     {
       if (_isDisposed) throw new ObjectDisposedException(nameof(StateMachine));
       GraphHost.RequireCount(snapshot.RootGraphCount, _graphHost.HostedGraphCount, "graphs");
+      var check = new SnapshotReader(snapshot.Graphs, snapshot.States);
+      _graphHost.Check(ref check);
+      check.RequireFullyRead();
+
       _isStarted = snapshot.Started;
       _poweredNode.SetTurnedOn(snapshot.TurnedOn);
       var reader = new SnapshotReader(snapshot.Graphs, snapshot.States);
       _graphHost.Load(ref reader);
-      reader.RequireFullyRead();
     }
 
     public void UpdateMachine()

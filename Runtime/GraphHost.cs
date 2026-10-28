@@ -161,6 +161,13 @@ namespace Nopnag.StateMachineLib
       for (var i = 0; i < _hostedGraphs.Count; i++) _hostedGraphs[i].Save(writer);
     }
 
+    internal void Check(ref SnapshotReader reader)
+    {
+      if (_isDisposed) throw new ObjectDisposedException(nameof(GraphHost));
+
+      for (var i = 0; i < _hostedGraphs.Count; i++) _hostedGraphs[i].Check(ref reader);
+    }
+
     internal void Load(ref SnapshotReader reader)
     {
       if (_isDisposed) throw new ObjectDisposedException(nameof(GraphHost));

@@ -582,7 +582,7 @@ namespace Nopnag.StateMachineLib.Tests
     }
 
     [Test]
-    public void EveryTopologyMismatchIsRejected()
+    public void EveryTopologyMismatchIsRejectedBeforeAnythingChanges()
     {
       var saved = Track(new Rig());
       RunToCharge(saved);
@@ -596,16 +596,25 @@ namespace Nopnag.StateMachineLib.Tests
       extraGraph.Strike.CreateGraph().CreateState();
       var extraRoot = Track(new Rig());
       extraRoot.Machine.CreateGraph().CreateState();
-
-      Assert.Throws<InvalidOperationException>(() => extraState.Machine.Load(snapshot));
-      Assert.Throws<InvalidOperationException>(() => extraTimer.Machine.Load(snapshot));
-      Assert.Throws<InvalidOperationException>(() => extraGraph.Machine.Load(snapshot));
-      Assert.Throws<InvalidOperationException>(() => extraRoot.Machine.Load(snapshot));
+      foreach (var mismatch in new[] { extraState, extraTimer, extraGraph, extraRoot })
+        RejectsUnchanged(mismatch, snapshot);
 
       var trailing = saved.Machine.Save();
       Array.Resize(ref trailing.States, trailing.States.Length + 1);
       trailing.States[trailing.States.Length - 1] = trailing.States[0];
-      Assert.Throws<InvalidOperationException>(() => Track(new Rig()).Machine.Load(trailing));
+      RejectsUnchanged(Track(new Rig()), trailing);
+
+      var truncated = saved.Machine.Save();
+      Array.Resize(ref truncated.States, truncated.States.Length - 1);
+      RejectsUnchanged(Track(new Rig()), truncated);
+
+      var missingGraph = saved.Machine.Save();
+      Array.Resize(ref missingGraph.Graphs, missingGraph.Graphs.Length - 1);
+      RejectsUnchanged(Track(new Rig()), missingGraph);
+
+      var unknownState = saved.Machine.Save();
+      unknownState.Graphs[0].Current = 3;
+      RejectsUnchanged(Track(new Rig()), unknownState);
     }
 
     [Test]
@@ -644,6 +653,15 @@ namespace Nopnag.StateMachineLib.Tests
       foreach (var entry in loaded.Log)
         StringAssert.DoesNotContain("enter", entry, "Enabling the owner does not enter again.");
       Assert.GreaterOrEqual(loaded.Charge.DeltaTimeSinceStart, saved.Charge.DeltaTimeSinceStart);
+    }
+
+    // The machine runs into Charge first, so a partial load would be visible.
+    static void RejectsUnchanged(Rig rig, StateMachineSnapshot snapshot)
+    {
+      RunToCharge(rig);
+      var before = JsonUtility.ToJson(rig.Machine.Save());
+      Assert.Throws<InvalidOperationException>(() => rig.Machine.Load(snapshot));
+      Assert.AreEqual(before, JsonUtility.ToJson(rig.Machine.Save()), "A rejected load changes nothing.");
     }
 
     StateMachine Single(out StateUnit state)

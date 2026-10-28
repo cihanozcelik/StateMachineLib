@@ -454,8 +454,20 @@ entered again by `Start` or a lazy-starting tick.
 **Topology.** Graphs, states, hosted graphs, transitions and timers are
 construction, not state. A snapshot loads into a machine or graph built the same
 way: same states in the same creation order, same hosted graphs, same timers in the
-same registration order. `Load` throws `InvalidOperationException` when the counts
-differ. Save between ticks and event raises, not from inside a callback.
+same registration order. `Load` first compares the whole snapshot with the
+topology. On any difference it throws `InvalidOperationException` and changes
+nothing.
+
+**When to call.** Save between ticks and event raises: a save from inside a
+callback captures a timer pass or a transition in progress. `Load` can be called
+from a callback: like a state re-entry, it stops the remaining timer pass of the
+state whose callback is running.
+
+**What is not saved.** Only library variables. Event subscriptions, transitions,
+timers and callbacks are construction and stay as built. The owner saves its own
+fields. A local variable that a state lambda captures and changes, such as
+`var count = 0; state.OnUpdate = _ => count++;`, lives in a compiler-generated
+closure that nothing can save: keep mutable data in owner fields.
 
 **Snapshot format.** `StateMachineSnapshot` and `StateGraphSnapshot` are plain,
 non-recursive `[Serializable]` data. `Graphs` and `States` list every graph and
@@ -788,6 +800,8 @@ current `StartAllGraphs` enters every attached graph. See
 | `Exit` | retained | exits current states | yes | Powers off after graph exits. |
 | `Reset` | retained | exits current states | yes | Powers off before graph exits. |
 | `Dispose` | attached graph subscriptions/timers cleared | exits attached current states | no | Terminal and idempotent. |
+| `Save` | retained | none | n/a | Copies runtime variables; changes nothing. |
+| `Load` | retained; must match the snapshot | none; nothing evaluated | yes | Writes saved variables, including the started flag; a mismatch throws and changes nothing. See [Save and load](#save-and-load). |
 
 Lifecycle callbacks are not exception-atomic. They must not throw. `Exit` and `Reset`
 also differ in power timing during `OnExit`; do not raise state-changing events from
@@ -883,6 +897,19 @@ a second ownership topology with them.
 | `RefreshPowerState` | Recompute `HasPower` and recurse through children. |
 | `HasPower`, `IsTurnedOn`, `IsActive` | Inspect power state. |
 
+### Save types
+
+| Type | Purpose |
+|---|---|
+| `ISaveable<TSnapshot>` | `Save()` and `Load(snapshot)`; implemented by `StateMachine`, `StateGraph` and owners. |
+| `StateMachineSnapshot` | Started flag, power switch, root graph count, and every graph and state in save order. |
+| `StateGraphSnapshot` | One graph and its descendants in save order; the first graph is the saved graph. |
+| `SavedGraph` | One graph: power switch, initial and current state indices, state and hosted graph counts. |
+| `SavedState` | One state: power switch, time scale, deltas, clocks, hosted graph count and timer bookkeeping. |
+
+All are `[Serializable]` classes with public fields and no recursion. See
+[Save and load](#save-and-load).
+
 ### `StateMachineWrapper` and `MonoBehaviourExtensions`
 
 - `MonoBehaviourExtensions.CreateManagedStateMachine` is the normal managed entry
@@ -912,6 +939,10 @@ Allocate and prepare before interactive runtime:
 - list capacities and the managed wrapper path for the maximum owner count;
 - concrete callback branches, Unity bindings, and consumer resources.
 
+`Save` allocates its snapshot: call it at a save boundary, not every frame. `Load`
+does not allocate; its allocation test loads a prepared snapshot repeatedly. Its
+error messages allocate only when it throws.
+
 Do not during interactive runtime:
 
 - add states, graphs, transitions, timers, listeners, or query topology;
@@ -939,6 +970,9 @@ warmed real path in Play Mode and on the target device.
   cleanup completed.
 - Do not depend on warning-and-return behavior for invalid topology. Construct and
   validate topology before any state mutation or start.
+- `Save` and `Load` throw `ObjectDisposedException` on a disposed machine or graph.
+  `Load` throws `InvalidOperationException` for a snapshot of another topology, after
+  checking and before changing anything.
 
 ## Attention checklist
 
@@ -967,6 +1001,9 @@ Before shipping a StateMachineLib flow, verify all of the following:
 - Shutdown uses the correct owner: managed removal for managed machines, and
   `Exit` plus `Dispose` for terminal manual ownership.
 - The actual warmed gameplay and rare paths have been checked in the Unity Profiler.
+- A saveable owner implements `ISaveable`, keeps its machine's snapshot beside its own
+  fields, and keeps no mutable data in captured lambda locals.
+- A snapshot is loaded into a topology built in the same order as the saved one.
 
 ## Test coverage map
 
@@ -982,8 +1019,13 @@ The repository tests provide evidence for:
 - independent Update/Fixed clocks, local time scaling, and fixed callbacks;
 - save and load: a fresh machine loaded from a save, after a serialization round
   trip, continuing exactly like the saved one; timers loaded from their own flags;
-  power switches, initial states and every state's time scale; graph-level
-  snapshots; owner composition; topology mismatch;
+  each timer kind; an unfired timer past its time; no interval replay; the fixed
+  fast path; events and event transitions; unentered hosted graphs; paused and
+  unstarted snapshots; loading from a callback; parameterless ticks after a load;
+  side-effect-free saving; allocation-free loading; power switches, initial states
+  and every state's time scale; graph-level snapshots; owner composition; a managed
+  machine loaded before its owner is enabled; topology mismatches rejected before
+  anything changes; disposal;
 - disposal unsubscription on covered paths;
 - one narrow warmed explicit-tick allocation path.
 
