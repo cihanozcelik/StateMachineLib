@@ -4,7 +4,8 @@ using Nopnag.EventBusLib;
 
 namespace Nopnag.StateMachineLib
 {
-  public class StateMachine : IGraphHost, IDisposable, IPoweredNode
+  public class StateMachine : IGraphHost, IDisposable, IPoweredNode,
+    ISaveable<StateMachineSnapshot>
   {
     readonly GraphHost _graphHost;
 
@@ -184,6 +185,42 @@ namespace Nopnag.StateMachineLib
         _poweredNode.SetTurnedOn(true); // Turn on power
         _graphHost.StartAllGraphs();
       }
+    }
+
+    /// <summary>
+    /// Saves the machine's runtime state: started flag, power switch and every hosted
+    /// graph at every depth. The owner's own variables are not included; the owner
+    /// saves them beside this snapshot.
+    /// </summary>
+    public StateMachineSnapshot Save()
+    {
+      if (_isDisposed) throw new ObjectDisposedException(nameof(StateMachine));
+      var writer = new SnapshotWriter();
+      _graphHost.Save(writer);
+      return new StateMachineSnapshot
+      {
+        Started        = _isStarted,
+        TurnedOn       = IsTurnedOn,
+        RootGraphCount = _graphHost.HostedGraphCount,
+        Graphs         = writer.Graphs.ToArray(),
+        States         = writer.States.ToArray()
+      };
+    }
+
+    /// <summary>
+    /// Loads a snapshot saved from a machine with the same topology, started or not.
+    /// No OnEnter or OnExit runs and nothing is evaluated. A loaded started machine is
+    /// not entered again by Start or a lazy-starting tick.
+    /// </summary>
+    public void Load(StateMachineSnapshot snapshot)
+    {
+      if (_isDisposed) throw new ObjectDisposedException(nameof(StateMachine));
+      GraphHost.RequireCount(snapshot.RootGraphCount, _graphHost.HostedGraphCount, "graphs");
+      _isStarted = snapshot.Started;
+      _poweredNode.SetTurnedOn(snapshot.TurnedOn);
+      var reader = new SnapshotReader(snapshot.Graphs, snapshot.States);
+      _graphHost.Load(ref reader);
+      reader.RequireFullyRead();
     }
 
     public void UpdateMachine()

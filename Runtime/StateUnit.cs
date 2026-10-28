@@ -857,6 +857,97 @@ namespace Nopnag.StateMachineLib
       ExitStateFunction?.Invoke();
     }
 
+    internal void Save(SnapshotWriter writer)
+    {
+      var saved = new SavedState
+      {
+        TurnedOn         = IsTurnedOn,
+        LocalTimeScale   = _localTimeScale,
+        DeltaTime        = DeltaTime,
+        Elapsed          = DeltaTimeSinceStart,
+        FixedDeltaTime   = FixedDeltaTime,
+        FixedElapsed     = FixedElapsed,
+        HostedGraphCount = _graphHost.HostedGraphCount,
+        AtInvoked        = new bool[_scheduledCallbacks.Count],
+        AtEveryNext      = new float[_periodicCallbacks.Count],
+        AtFixedInvoked   = new bool[_fixedScheduledCallbacks.Count],
+        AtEveryFixedNext = new float[_fixedPeriodicCallbacks.Count]
+      };
+      for (var i = 0; i < _scheduledCallbacks.Count; i++)
+        saved.AtInvoked[i] = _scheduledCallbacks[i].HasBeenInvoked;
+      for (var i = 0; i < _periodicCallbacks.Count; i++)
+        saved.AtEveryNext[i] = _periodicCallbacks[i].NextInvocationTime;
+      for (var i = 0; i < _fixedScheduledCallbacks.Count; i++)
+        saved.AtFixedInvoked[i] = _fixedScheduledCallbacks[i].HasBeenInvoked;
+      for (var i = 0; i < _fixedPeriodicCallbacks.Count; i++)
+        saved.AtEveryFixedNext[i] = _fixedPeriodicCallbacks[i].NextInvocationTime;
+      writer.States.Add(saved);
+      _graphHost.Save(writer);
+    }
+
+    // Writes every saved value back. Only two values are not copied: the Update
+    // clock's previous wall-clock time is set to now, so time before the load is not
+    // consumed, and a timer pass in progress is stopped.
+    internal void Load(ref SnapshotReader reader)
+    {
+      var saved = reader.States[reader.NextState++];
+      GraphHost.RequireCount(saved.HostedGraphCount, _graphHost.HostedGraphCount,
+        "hosted graphs of a state");
+      GraphHost.RequireCount(saved.AtInvoked.Length, _scheduledCallbacks.Count, "At timers");
+      GraphHost.RequireCount(saved.AtEveryNext.Length, _periodicCallbacks.Count,
+        "AtEvery timers");
+      GraphHost.RequireCount(saved.AtFixedInvoked.Length, _fixedScheduledCallbacks.Count,
+        "AtFixed timers");
+      GraphHost.RequireCount(saved.AtEveryFixedNext.Length, _fixedPeriodicCallbacks.Count,
+        "AtEveryFixed timers");
+
+      unchecked { _timerPassVersion++; }
+      _poweredNode.SetTurnedOn(saved.TurnedOn);
+      _localTimeScale     = saved.LocalTimeScale;
+      _previousTime       = Time.time;
+      DeltaTime           = saved.DeltaTime;
+      DeltaTimeSinceStart = saved.Elapsed;
+      FixedDeltaTime      = saved.FixedDeltaTime;
+      FixedElapsed        = saved.FixedElapsed;
+
+      for (var i = 0; i < _scheduledCallbacks.Count; i++)
+      {
+        var sc = _scheduledCallbacks[i];
+        sc.HasBeenInvoked      = saved.AtInvoked[i];
+        _scheduledCallbacks[i] = sc;
+      }
+
+      for (var i = 0; i < _periodicCallbacks.Count; i++)
+      {
+        var pc = _periodicCallbacks[i];
+        pc.NextInvocationTime = saved.AtEveryNext[i];
+        _periodicCallbacks[i] = pc;
+      }
+
+      _pendingFixedScheduledCallbacks = 0;
+      for (var i = 0; i < _fixedScheduledCallbacks.Count; i++)
+      {
+        var sc = _fixedScheduledCallbacks[i];
+        sc.HasBeenInvoked = saved.AtFixedInvoked[i];
+        if (!sc.HasBeenInvoked) _pendingFixedScheduledCallbacks++;
+        _fixedScheduledCallbacks[i] = sc;
+      }
+
+      if (_pendingFixedScheduledCallbacks != 0)
+        _fixedTickCapabilities |= FixedTickCapabilities.ScheduledCallback;
+      else
+        _fixedTickCapabilities &= ~FixedTickCapabilities.ScheduledCallback;
+
+      for (var i = 0; i < _fixedPeriodicCallbacks.Count; i++)
+      {
+        var pc = _fixedPeriodicCallbacks[i];
+        pc.NextInvocationTime      = saved.AtEveryFixedNext[i];
+        _fixedPeriodicCallbacks[i] = pc;
+      }
+
+      _graphHost.Load(ref reader);
+    }
+
     internal void ClearSubscriptions()
     {
       // Unsubscribe EventBus listeners

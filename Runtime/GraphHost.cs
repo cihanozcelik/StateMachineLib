@@ -152,6 +152,30 @@ namespace Nopnag.StateMachineLib
         _hostedGraphs[i].RebaseUpdateClocks();
     }
 
+    internal int HostedGraphCount => _hostedGraphs.Count;
+
+    internal void Save(SnapshotWriter writer)
+    {
+      if (_isDisposed) throw new ObjectDisposedException(nameof(GraphHost));
+
+      for (var i = 0; i < _hostedGraphs.Count; i++) _hostedGraphs[i].Save(writer);
+    }
+
+    internal void Load(ref SnapshotReader reader)
+    {
+      if (_isDisposed) throw new ObjectDisposedException(nameof(GraphHost));
+
+      for (var i = 0; i < _hostedGraphs.Count; i++) _hostedGraphs[i].Load(ref reader);
+    }
+
+    // A snapshot loads only into the topology it was saved from.
+    internal static void RequireCount(int saved, int live, string what)
+    {
+      if (saved != live)
+        throw new InvalidOperationException(
+          $"The snapshot has {saved} {what} but this topology has {live}.");
+    }
+
     /// <summary>
     /// Disposes the GraphHost and all its hosted graphs.
     /// </summary>

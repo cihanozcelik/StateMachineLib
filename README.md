@@ -16,6 +16,7 @@ recommendation.
 - [Understand ownership](#core-model-and-ownership)
 - [Callbacks and execution order](#state-callbacks-and-exact-execution-order)
 - [Time and timers](#time-and-timer-api)
+- [Save and load](#save-and-load)
 - [Transitions](#transition-api)
 - [Events](#state-scoped-event-listeners)
 - [Graph lifetime](#graph-attachment-and-detachment)
@@ -412,6 +413,78 @@ transitions. Use `SetTurnedOn(false)` when event handling must pause as well.
 
 The scale is configuration and persists across state re-entry; elapsed clocks reset.
 
+## Save and load
+
+`StateMachine` and `StateGraph` implement `ISaveable<TSnapshot>`:
+
+```csharp
+public interface ISaveable<TSnapshot>
+{
+  TSnapshot Save();
+  void Load(TSnapshot snapshot);
+}
+```
+
+`Save` copies every runtime variable the library owns, for every graph and state
+at every depth:
+
+- the machine's started flag and power switch;
+- each graph's power switch, `InitialUnit` and current state;
+- each state's power switch, `LocalTimeScale`, `DeltaTime`, `DeltaTimeSinceStart`,
+  `FixedDeltaTime` and `FixedElapsed`, current or not;
+- each timer's own bookkeeping: whether each `At`/`AtFixed` timer has fired and
+  each `AtEvery`/`AtEveryFixed` timer's next deadline.
+
+Nothing is derived from elapsed time: a timer that has not fired at its time,
+such as one in a state entered with a zero time scale, loads unfired.
+
+`Load` writes those values back. No `OnEnter` or `OnExit` runs and no callback or
+transition is evaluated; the next tick continues from the saved values. Two values
+are not copied:
+
+- The Update clock's previous wall-clock time is set to now, so time before the
+  load is not consumed by a parameterless tick.
+- The event-raise guard of the current state is cleared. It blocks only the raise
+  that entered the state, which has finished, and raise IDs restart in a new
+  process.
+
+A machine can load before or after it starts. A loaded started machine is not
+entered again by `Start` or a lazy-starting tick.
+
+**Topology.** Graphs, states, hosted graphs, transitions and timers are
+construction, not state. A snapshot loads into a machine or graph built the same
+way: same states in the same creation order, same hosted graphs, same timers in the
+same registration order. `Load` throws `InvalidOperationException` when the counts
+differ. Save between ticks and event raises, not from inside a callback.
+
+**Snapshot format.** `StateMachineSnapshot` and `StateGraphSnapshot` are plain,
+non-recursive `[Serializable]` data. `Graphs` and `States` list every graph and
+state in save order: a graph, then each of its states followed by that state's
+hosted graphs, then the graph's own hosted graphs. States are identified by their
+index in `StateGraph.States`; -1 is none.
+
+**The developer's variables.** A state's behavior also depends on the owner's
+fields, closure data and services, which the library cannot see. The owner
+implements the same interface and keeps the machine's snapshot beside its own
+variables:
+
+```csharp
+public sealed class Fighter : MonoBehaviour, ISaveable<FighterSnapshot>
+{
+  public FighterSnapshot Save() =>
+    new() { Machine = _machine.Save(), Charges = _charges, Target = _target.Id };
+
+  public void Load(FighterSnapshot snapshot)
+  {
+    _machine.Load(snapshot.Machine);
+    _charges = snapshot.Charges;
+    _target  = _targets.Find(snapshot.Target);
+  }
+}
+```
+
+`Save` allocates the snapshot. `Load` does not allocate.
+
 ## Transition API
 
 All transition delegates and transition objects should be constructed before the
@@ -743,6 +816,7 @@ inconsistent; see [SM-011](KNOWN_ISSUES.md#sm-011--disposed-machines-can-still-r
 | `LocalRaise<T>` | Raise and forward a local event downward. |
 | `SetTurnedOn` | Pause/resume power without exit. |
 | `Exit`, `Reset` | Restartable exit variants with different power timing. |
+| `Save`, `Load` | `ISaveable<StateMachineSnapshot>`; see [Save and load](#save-and-load). |
 | `Dispose` | Terminal cleanup for attached graphs and subscriptions. |
 | `HasPower`, `IsTurnedOn`, `IsActive` | Power-state inspection. |
 
@@ -758,6 +832,8 @@ normal manual machine.
 | obsolete `CreateUnit(name)` | Legacy named-state creation. |
 | `InitialUnit` | Mutable initial state; must belong to this graph. |
 | `CurrentUnit` | Current state; throws after parent disposal. |
+| `States` | States in creation order; snapshots identify states by this index. |
+| `Save`, `Load` | `ISaveable<StateGraphSnapshot>` for this graph and its descendants; see [Save and load](#save-and-load). |
 | `EnterGraph`, `ExitGraph` | Synchronous manual entry/exit. |
 | `StartState` | Advanced synchronous entry, e.g. an owned lifecycle reset; prefer prepared transitions for normal flow. Target must belong to graph. |
 | `UpdateGraph` / `(float)` | Drive graph Update; explicit form validates delta. |
@@ -904,6 +980,10 @@ The repository tests provide evidence for:
 - local downward propagation stop across descendants and siblings;
 - power propagation and common pause/resume behavior;
 - independent Update/Fixed clocks, local time scaling, and fixed callbacks;
+- save and load: a fresh machine loaded from a save, after a serialization round
+  trip, continuing exactly like the saved one; timers loaded from their own flags;
+  power switches, initial states and every state's time scale; graph-level
+  snapshots; owner composition; topology mismatch;
 - disposal unsubscription on covered paths;
 - one narrow warmed explicit-tick allocation path.
 
