@@ -186,6 +186,47 @@ namespace Nopnag.StateMachineLib
       }
     }
 
+    /// <summary>
+    /// Saves the machine's runtime state: started flag, power switch and every hosted
+    /// graph at every depth. The owner's own variables are not included; the owner
+    /// saves them beside this snapshot.
+    /// </summary>
+    public StateMachineSnapshot Save()
+    {
+      if (_isDisposed) throw new ObjectDisposedException(nameof(StateMachine));
+      var writer = new SnapshotWriter();
+      _graphHost.Save(writer);
+      return new StateMachineSnapshot
+      {
+        Started        = _isStarted,
+        TurnedOn       = IsTurnedOn,
+        RootGraphCount = _graphHost.HostedGraphCount,
+        Graphs         = writer.Graphs.ToArray(),
+        States         = writer.States.ToArray()
+      };
+    }
+
+    /// <summary>
+    /// Loads a snapshot saved from a machine with the same topology, started or not.
+    /// The whole snapshot is compared with the topology first: a mismatch throws
+    /// InvalidOperationException and changes nothing. No OnEnter or OnExit runs and
+    /// nothing is evaluated. A loaded started machine is
+    /// not entered again by Start or a lazy-starting tick.
+    /// </summary>
+    public void Load(StateMachineSnapshot snapshot)
+    {
+      if (_isDisposed) throw new ObjectDisposedException(nameof(StateMachine));
+      GraphHost.RequireCount(snapshot.RootGraphCount, _graphHost.HostedGraphCount, "graphs");
+      var check = new SnapshotReader(snapshot.Graphs, snapshot.States);
+      _graphHost.Check(ref check);
+      check.RequireFullyRead();
+
+      _isStarted = snapshot.Started;
+      _poweredNode.SetTurnedOn(snapshot.TurnedOn);
+      var reader = new SnapshotReader(snapshot.Graphs, snapshot.States);
+      _graphHost.Load(ref reader);
+    }
+
     public void UpdateMachine()
     {
       if (_isDisposed) throw new ObjectDisposedException(nameof(StateMachine));

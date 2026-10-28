@@ -337,6 +337,88 @@ namespace Nopnag.StateMachineLib
       CurrentUnit.Start();
     }
 
+    /// <summary>
+    /// This graph's states in creation order. Snapshots identify states by this index.
+    /// </summary>
+    public IReadOnlyList<StateUnit> States => _units;
+
+    /// <summary>
+    /// Saves this graph's runtime state: power switch, initial and current state, every
+    /// state's clocks, deltas, time scale and timer bookkeeping, and every hosted graph
+    /// at every depth.
+    /// </summary>
+    public StateGraphSnapshot Save()
+    {
+      var writer = new SnapshotWriter();
+      Save(writer);
+      return new StateGraphSnapshot
+      {
+        Graphs = writer.Graphs.ToArray(),
+        States = writer.States.ToArray()
+      };
+    }
+
+    /// <summary>
+    /// Loads a snapshot saved from a graph with the same topology. The whole snapshot is
+    /// compared with the topology first: a mismatch throws InvalidOperationException and
+    /// changes nothing. No OnEnter or OnExit runs and nothing is evaluated; the next
+    /// tick continues from the saved values.
+    /// </summary>
+    public void Load(StateGraphSnapshot snapshot)
+    {
+      var check = new SnapshotReader(snapshot.Graphs, snapshot.States);
+      Check(ref check);
+      check.RequireFullyRead();
+      var reader = new SnapshotReader(snapshot.Graphs, snapshot.States);
+      Load(ref reader);
+    }
+
+    internal void Save(SnapshotWriter writer)
+    {
+      if (_isDisposedByParent) throw new ObjectDisposedException(nameof(StateGraph));
+
+      writer.Graphs.Add(new SavedGraph
+      {
+        TurnedOn         = IsTurnedOn,
+        Initial          = InitialUnit == null ? -1 : _units.IndexOf(InitialUnit),
+        Current          = _currentUnit == null ? -1 : _units.IndexOf(_currentUnit),
+        StateCount       = _units.Count,
+        HostedGraphCount = _graphHost.HostedGraphCount
+      });
+      for (var i = 0; i < _units.Count; i++) _units[i].Save(writer);
+      _graphHost.Save(writer);
+    }
+
+    // Compares the snapshot with this graph's topology without changing anything.
+    internal void Check(ref SnapshotReader reader)
+    {
+      if (_isDisposedByParent) throw new ObjectDisposedException(nameof(StateGraph));
+
+      var saved = reader.NextGraphEntry();
+      GraphHost.RequireCount(saved.StateCount, _units.Count, "states of a graph");
+      GraphHost.RequireCount(saved.HostedGraphCount, _graphHost.HostedGraphCount,
+        "hosted graphs of a graph");
+      if (saved.Initial < -1 || saved.Initial >= _units.Count ||
+          saved.Current < -1 || saved.Current >= _units.Count)
+        throw new InvalidOperationException(
+          $"The snapshot names state {saved.Initial} or {saved.Current} but this graph has {_units.Count}.");
+      for (var i = 0; i < _units.Count; i++) _units[i].Check(ref reader);
+      _graphHost.Check(ref reader);
+    }
+
+    internal void Load(ref SnapshotReader reader)
+    {
+      var saved = reader.Graphs[reader.NextGraph++];
+      _poweredNode.SetTurnedOn(saved.TurnedOn);
+      InitialUnit  = saved.Initial < 0 ? null : _units[saved.Initial];
+      _currentUnit = saved.Current < 0 ? null : _units[saved.Current];
+      // A raise ID guards only the raise that entered the state, and that raise has
+      // finished. IDs restart in a new process, so the saved one is not copied.
+      _currentStateEntryRaiseId = 0;
+      for (var i = 0; i < _units.Count; i++) _units[i].Load(ref reader);
+      _graphHost.Load(ref reader);
+    }
+
     public void UpdateGraph()
     {
       UpdateGraphInternal(false, 0f);
