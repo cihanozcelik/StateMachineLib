@@ -17,9 +17,19 @@ namespace Nopnag.StateMachineLib
     /// <summary>
     /// Creates a new GraphHost with its own LocalEventBus.
     /// </summary>
-    public GraphHost()
+    public GraphHost(IStateMachineClock clock)
     {
+      Clock = clock;
       _localEventBus = new LocalEventBus();
+    }
+
+    internal IStateMachineClock Clock { get; private set; }
+
+    internal void BindClock(IStateMachineClock clock)
+    {
+      Clock = clock;
+      for (var i = 0; i < _hostedGraphs.Count; i++)
+        _hostedGraphs[i].BindClock(clock);
     }
 
     public void AttachGraph(StateGraph graph)
@@ -28,6 +38,7 @@ namespace Nopnag.StateMachineLib
       if (graph == null) throw new ArgumentNullException(nameof(graph));
       if (_hostedGraphs.Contains(graph)) return; // Already hosted
 
+      graph.BindClock(Clock);
       ((IPoweredNode)graph).SetTurnedOn(true); // Re-activate the graph
       graph.ClearDisposedByParentFlagInternal(); 
       _hostedGraphs.Add(graph);
@@ -43,7 +54,7 @@ namespace Nopnag.StateMachineLib
     {
       if (_isDisposed) throw new ObjectDisposedException(nameof(GraphHost));
 
-      var stateGraph = new StateGraph();
+      var stateGraph = new StateGraph(Clock);
       AttachGraph(stateGraph);
       return stateGraph;
     }

@@ -12,11 +12,16 @@ namespace Nopnag.StateMachineLib
     bool                 _isStarted  = false;
     readonly PoweredNode _poweredNode;
 
-    public StateMachine()
+    public StateMachine() : this(StateMachineClock.Default) { }
+
+    /// <summary>Creates a machine whose entire graph tree uses the supplied clock.</summary>
+    public StateMachine(IStateMachineClock clock)
     {
-      _graphHost   = new GraphHost();
+      _graphHost   = new GraphHost(clock);
       _poweredNode = new PoweredNode(true);
     }
+
+    public IStateMachineClock Clock => _graphHost.Clock;
 
     internal LocalEventBus LocalEventBus => _graphHost.LocalEventBus;
 
@@ -236,7 +241,7 @@ namespace Nopnag.StateMachineLib
 
     /// <summary>
     /// Updates all graphs with an explicit delta for deterministic simulation.
-    /// Existing parameterless callers retain their wall-clock behavior.
+    /// Parameterless callers use the clock supplied when this machine was created.
     /// </summary>
     public void UpdateMachine(float deltaTime)
     {

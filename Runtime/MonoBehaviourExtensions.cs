@@ -16,8 +16,18 @@ namespace Nopnag.StateMachineLib
         /// <returns>A new StateMachine instance that is lifecycle-managed and started.</returns>
         public static StateMachine CreateManagedStateMachine(this MonoBehaviour mb, Action<StateMachine> setupCallback)
         {
+            return mb.CreateManagedStateMachine(StateMachineClock.Default, setupCallback);
+        }
+
+        /// <summary>
+        /// Creates and starts a lifecycle-managed machine using the supplied clock.
+        /// The clock is installed before setup and OnEnter callbacks execute.
+        /// </summary>
+        public static StateMachine CreateManagedStateMachine(this MonoBehaviour mb,
+            IStateMachineClock clock, Action<StateMachine> setupCallback)
+        {
             var wrapper = StateMachineWrapper.GetOrCreate(mb.gameObject);
-            return wrapper.CreateStateMachineFor(mb, setupCallback);
+            return wrapper.CreateStateMachineFor(mb, clock, setupCallback);
         }
     }
 } 
