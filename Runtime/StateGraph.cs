@@ -46,11 +46,25 @@ namespace Nopnag.StateMachineLib
     readonly PoweredNode     _poweredNode;
     readonly List<StateUnit> _units = new();
 
-    public StateGraph()
+    public StateGraph() : this(StateMachineClock.Default) { }
+
+    /// <summary>
+    /// Creates a standalone graph with an explicit clock. Attaching it to a host
+    /// adopts the host's clock for this graph and all descendants.
+    /// </summary>
+    public StateGraph(IStateMachineClock clock)
     {
-      _graphHost   = new GraphHost();
+      _graphHost   = new GraphHost(clock);
       _poweredNode = new PoweredNode(false);
       _poweredNode.SetTurnedOn(true); // Graphs are always turned on by default
+    }
+
+    public IStateMachineClock Clock => _graphHost.Clock;
+
+    internal void BindClock(IStateMachineClock clock)
+    {
+      _graphHost.BindClock(clock);
+      for (var i = 0; i < _units.Count; i++) _units[i].BindClock(clock);
     }
 
     public StateUnit CurrentUnit
@@ -197,7 +211,7 @@ namespace Nopnag.StateMachineLib
 
     public void FixedUpdateGraph()
     {
-      FixedUpdateGraph(Time.fixedDeltaTime);
+      FixedUpdateGraph(Clock.FixedDeltaTime);
     }
 
     /// <summary>

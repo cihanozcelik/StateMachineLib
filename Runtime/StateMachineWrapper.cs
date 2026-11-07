@@ -41,6 +41,16 @@ public class StateMachineWrapper : MonoBehaviour
   /// </summary>
   public StateMachine CreateStateMachineFor(MonoBehaviour owner, Action<StateMachine> setupCallback)
   {
+    return CreateStateMachineFor(owner, StateMachineClock.Default, setupCallback);
+  }
+
+  /// <summary>
+  /// Creates a managed machine with an explicit clock before setup and synchronous
+  /// start. An already registered owner retains its original machine and clock.
+  /// </summary>
+  public StateMachine CreateStateMachineFor(MonoBehaviour owner, IStateMachineClock clock,
+    Action<StateMachine> setupCallback)
+  {
     if (owner == null)
       throw new ArgumentNullException(nameof(owner));
     
@@ -55,7 +65,7 @@ public class StateMachineWrapper : MonoBehaviour
       return _managedStateMachines[owner].StateMachine;
     }
 
-    var sm    = new StateMachine();
+    var sm    = new StateMachine(clock);
     var entry = new ManagedStateMachineEntry(owner, sm);
     _managedStateMachines[owner] = entry;
     _managedStateMachineEntries.Add(entry);

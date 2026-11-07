@@ -81,7 +81,7 @@ namespace Nopnag.StateMachineLib
 
     // IPoweredNode implementation  
     readonly PoweredNode _poweredNode;
-    float                _previousTime;
+    double               _previousTime;
     float                _localTimeScale = 1f;
     // Timer dispatch belongs to one entry. Exit/re-entry invalidates an outer pass,
     // even when the graph's current state is the same StateUnit again.
@@ -98,7 +98,7 @@ namespace Nopnag.StateMachineLib
     {
       Name         = name;
       BaseGraph    = graph;
-      _graphHost   = new GraphHost();
+      _graphHost   = new GraphHost(graph.Clock);
       _poweredNode = new PoweredNode(false);
       _poweredNode.SetTurnedOn(true); // StateUnits are always turned on
     }
@@ -106,7 +106,7 @@ namespace Nopnag.StateMachineLib
     internal StateUnit(StateGraph graph)
     {
       BaseGraph    = graph;
-      _graphHost   = new GraphHost();
+      _graphHost   = new GraphHost(graph.Clock);
       _poweredNode = new PoweredNode(false);
       _poweredNode.SetTurnedOn(true); // StateUnits are always turned on
     }
@@ -553,7 +553,7 @@ namespace Nopnag.StateMachineLib
     internal void Start()
     {
       unchecked { _timerPassVersion++; }
-      _previousTime       = Time.time;
+      _previousTime       = BaseGraph.Clock.UpdateTime;
       DeltaTime           = 0f;
       DeltaTimeSinceStart = 0;
       FixedDeltaTime      = 0f;
@@ -604,17 +604,17 @@ namespace Nopnag.StateMachineLib
 
     internal bool Update()
     {
-      var now = Time.time;
-      var deltaTime = Mathf.Max(0f, now - _previousTime);
+      var now = BaseGraph.Clock.UpdateTime;
+      var deltaTime = (float)Math.Max(0d, now - _previousTime);
       return Update(deltaTime, now);
     }
 
     internal bool Update(float deltaTime)
     {
-      return Update(deltaTime, Time.time);
+      return Update(deltaTime, BaseGraph.Clock.UpdateTime);
     }
 
-    bool Update(float deltaTime, float now)
+    bool Update(float deltaTime, double now)
     {
       _previousTime = now;
       if (IsTimeFrozen)
@@ -842,9 +842,15 @@ namespace Nopnag.StateMachineLib
       return false;
     }
 
+    internal void BindClock(IStateMachineClock clock)
+    {
+      _previousTime = clock.UpdateTime;
+      _graphHost.BindClock(clock);
+    }
+
     internal void RebaseUpdateClock()
     {
-      _previousTime = Time.time;
+      _previousTime = BaseGraph.Clock.UpdateTime;
       _graphHost.RebaseUpdateClocks();
     }
 
@@ -902,7 +908,7 @@ namespace Nopnag.StateMachineLib
     }
 
     // Writes every saved value back. Only two values are not copied: the Update
-    // clock's previous wall-clock time is set to now, so time before the load is not
+    // clock's previous source time is set to now, so time before the load is not
     // consumed, and a timer pass in progress is stopped. Check has already compared
     // the snapshot with this topology.
     internal void Load(ref SnapshotReader reader)
@@ -911,7 +917,7 @@ namespace Nopnag.StateMachineLib
       unchecked { _timerPassVersion++; }
       _poweredNode.SetTurnedOn(saved.TurnedOn);
       _localTimeScale     = saved.LocalTimeScale;
-      _previousTime       = Time.time;
+      _previousTime       = BaseGraph.Clock.UpdateTime;
       DeltaTime           = saved.DeltaTime;
       DeltaTimeSinceStart = saved.Elapsed;
       FixedDeltaTime      = saved.FixedDeltaTime;

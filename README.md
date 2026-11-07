@@ -343,7 +343,7 @@ Each state exposes four clocks:
 
 All four reset on every state entry. Update and Fixed clocks are independent.
 
-Parameterless ticking reads Unity time:
+Parameterless ticking reads the machine's clock (Unity time by default):
 
 ```csharp
 machine.UpdateMachine();
@@ -360,6 +360,44 @@ machine.FixedUpdateMachine(fixedDelta);
 ```
 
 Pass only finite values greater than or equal to zero.
+
+### Clock ownership and replay
+
+`IStateMachineClock` supplies absolute scaled `double UpdateTime` and scaled
+`float FixedDeltaTime`. Construct a root with `new StateMachine(clock)` or
+`new StateGraph(clock)`. Managed owners use
+`owner.CreateManagedStateMachine(clock, setup)`. The clock is installed before
+setup, entry, and the first tick; wrapper lifecycle and automatic ticking stay
+unchanged. `machine.Clock` and `graph.Clock` expose the selected source.
+
+The application owns and advances the clock before each phase. Reads must be
+stable, side-effect-free and allocation-free. The library does not advance it,
+change Unity time, or supply a fixed-step scheduler. Replay must supply the same
+clock samples, phase order, external events and owner state, from the first tick.
+An injected clock alone is not a whole-game determinism guarantee.
+
+For application-wide configuration, set `StateMachineClock.Default` during startup,
+before constructing any machines. Parameterless constructors and managed creation
+capture that reference. Changing the default only affects future roots; explicit
+constructor/managed arguments take precedence. SubsystemRegistration restores
+`UnityStateMachineClock.Instance` each Play session even with domain reload disabled.
+Install an application default in a later initialization phase. Existing callers
+retain the original `Time.time` float sampling and `Time.fixedDeltaTime`; custom
+clocks can keep double precision at large epochs.
+
+A tree has one source. Created and attached graphs inherit the host's clock,
+including graph-hosted and state-hosted descendants and inactive states. Reattaching
+a graph adopts the new host's source and rebases the previous Update sample without
+changing its accumulated clocks or invoking callbacks. Detached graphs retain their
+last source. Existing attach/detach power and lifetime rules still apply.
+
+Entry, power resume, unfreezing local time and `Load` rebase against the selected
+source. A snapshot stores state elapsed time and timer progress, not the source
+object or its absolute epoch. Restore the application's clock before loading
+machines. Time spent before loading or while paused is not consumed afterward.
+Explicit delta overloads still consume exactly the supplied delta and rebase the
+next parameterless Update sample against the selected source. LateUpdate uses
+already accumulated Update time and does not advance either clock.
 
 ### Timed callbacks
 
